@@ -1,0 +1,14 @@
+{
+  "id": "t005",
+  "title": "Initialize Rust+WASM Figma clone project",
+  "status": "done",
+  "blocked_by": [],
+  "module": "figma-engine",
+  "subtasks": [],
+  "acceptance": [
+    "Cargo.toml exists",
+    "cargo check passes",
+    "cargo build --target wasm32 passes"
+  ],
+  "outcome": "Rust workspace initialized. 4 crates. cargo check + wasm32 both pass."
+}

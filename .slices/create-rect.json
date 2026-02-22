@@ -1,0 +1,32 @@
+{
+  "name": "create-rect",
+  "description": "User clicks toolbar \u2192 rectangle appears on canvas \u2192 CRDT op generated \u2192 synced to server \u2192 other clients see it",
+  "status": "active",
+  "layers": {
+    "frontend": {
+      "touched": "2026-02-21T20:51:14.470432",
+      "note": "TS project with typed WASM boundary, layers panel, properties panel"
+    },
+    "wasm": {
+      "touched": "2026-02-21T20:51:14.603047",
+      "note": "Already has add_rectangle binding"
+    },
+    "engine": {
+      "touched": "2026-02-21T20:51:14.729434",
+      "note": "Node creation, tree insertion, hit test all working"
+    },
+    "renderer": {
+      "touched": "2026-02-21T20:51:25.722554",
+      "note": "Tile-based rect rasterization already working"
+    },
+    "server": {
+      "touched": "2026-02-21T20:51:25.845202",
+      "note": "Axum server with REST+WebSocket scaffolded, compiles"
+    },
+    "crdt": {
+      "touched": "2026-02-21T20:51:50.498992",
+      "note": "CRDT ops exist but not yet wired into WASM add_rectangle. Next step: route mutations through CRDT."
+    }
+  },
+  "created": "2026-02-21T20:42:44.907766"
+}

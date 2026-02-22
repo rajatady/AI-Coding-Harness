@@ -1,0 +1,9 @@
+{
+  "id": "d004",
+  "timestamp": "2026-02-21T19:24:40.502051",
+  "question": "What will actually go wrong when building the Figma clone?",
+  "choice": "Five catastrophic failures identified \u2014 current tools address maybe 1 of them",
+  "why": "Forced myself to simulate the pain before building more tools",
+  "alternatives_rejected": [],
+  "affects": []
+}

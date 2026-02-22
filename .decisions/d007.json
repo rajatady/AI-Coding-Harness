@@ -1,0 +1,9 @@
+{
+  "id": "d007",
+  "timestamp": "2026-02-21T19:25:24.804551",
+  "question": "What language for the Figma clone?",
+  "choice": "Rust compiled to WASM for the engine, TypeScript thin wrapper for browser integration",
+  "why": "Performance goal exceeds Figma. Rust+WASM is the only path to that. TS wrapper keeps browser APIs accessible.",
+  "alternatives_rejected": [],
+  "affects": []
+}

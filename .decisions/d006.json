@@ -1,0 +1,9 @@
+{
+  "id": "d006",
+  "timestamp": "2026-02-21T19:25:24.669305",
+  "question": "Should I build a TS-based semantic index or keep everything in Python?",
+  "choice": "Python first pass using regex+AST heuristics, upgrade to tree-sitter only if needed",
+  "why": "I dont have npm installed yet. Python can parse TS structure well enough for cross-references. Dont over-engineer. I need 80% of the value now, not 100% later.",
+  "alternatives_rejected": [],
+  "affects": []
+}

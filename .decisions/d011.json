@@ -1,0 +1,8 @@
+{
+  "id": "d011",
+  "timestamp": "2026-02-21T19:42:51.247699",
+  "question": "Rendering approach?",
+  "choice": "Tile-based software renderer initially, WebGPU later",
+  "why": "A tile renderer is: (1) trivially parallelizable, (2) cache-friendly, (3) works in WASM without WebGPU, (4) the rendering correctness can be verified by comparing tile output to expected values \u2014 it is deterministic. GPU rendering adds complexity and non-determinism. Start software, add GPU as optimization layer.",
+  "affects": []
+}

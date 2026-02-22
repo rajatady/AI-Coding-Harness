@@ -1,0 +1,12 @@
+{
+  "id": "t028",
+  "title": "IDE tool: API surface viewer",
+  "status": "done",
+  "blocked_by": [],
+  "module": "ide-tooling",
+  "subtasks": [],
+  "acceptance": [
+    "ide api <crate> shows all pub fn/struct/enum signatures"
+  ],
+  "outcome": ""
+}

@@ -1,0 +1,15 @@
+{
+  "id": "t025",
+  "title": "IDE tool: Pain-check hook with auto-reflection",
+  "status": "done",
+  "blocked_by": [],
+  "module": "ide",
+  "subtasks": [],
+  "acceptance": [
+    "Fires every 12 tool calls",
+    "Tracks crates/languages touched",
+    "Reports IDE:Figma ratio",
+    "Blocks until reflection answered"
+  ],
+  "outcome": ""
+}

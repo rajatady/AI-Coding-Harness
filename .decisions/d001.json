@@ -1,0 +1,9 @@
+{
+  "id": "d001",
+  "timestamp": "2026-02-21T19:08:04.847117",
+  "question": "What language for the IDE itself?",
+  "choice": "Python for scripts, TypeScript for the target project",
+  "why": "Python has zero deps on macOS, handles JSON natively. TS is what the Figma clone will be built in.",
+  "alternatives_rejected": [],
+  "affects": []
+}

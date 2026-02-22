@@ -1,0 +1,14 @@
+{
+  "id": "t022",
+  "title": "Multi-client CRDT sync",
+  "status": "pending",
+  "blocked_by": [],
+  "module": "figma-crdt",
+  "subtasks": [],
+  "acceptance": [
+    "WebSocket transport",
+    "Operation serialization",
+    "Clock merging"
+  ],
+  "outcome": ""
+}

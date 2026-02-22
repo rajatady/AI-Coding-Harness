@@ -1,0 +1,13 @@
+{
+  "id": "t006",
+  "title": "Define document model contract",
+  "status": "done",
+  "blocked_by": [],
+  "module": "doc-model",
+  "subtasks": [],
+  "acceptance": [
+    "Type-level contract in .contracts/doc-model.rs compiles",
+    "Types make invalid documents unrepresentable"
+  ],
+  "outcome": "Contract is the type system itself. NodeKind enum forces exhaustive handling. Types prevent invalid docs."
+}

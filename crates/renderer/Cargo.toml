@@ -1,0 +1,10 @@
+[package]
+name = "figma-renderer"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+figma-engine = { path = "../engine" }
+glam = { workspace = true }
+bytemuck = { workspace = true }
+fontdue = { workspace = true }

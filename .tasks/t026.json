@@ -1,0 +1,14 @@
+{
+  "id": "t026",
+  "title": "IDE tool: Implementation journals (algorithmic context capture)",
+  "status": "done",
+  "blocked_by": [],
+  "module": "ide",
+  "subtasks": [],
+  "acceptance": [
+    "journal write/append/show/clear",
+    "Integrated into orient output",
+    "Survives compaction"
+  ],
+  "outcome": ""
+}

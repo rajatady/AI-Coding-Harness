@@ -1,0 +1,15 @@
+{
+  "id": "t016",
+  "title": "Boolean path operations",
+  "status": "done",
+  "blocked_by": [],
+  "module": "figma-engine",
+  "subtasks": [],
+  "acceptance": [
+    "Union works",
+    "Subtract works",
+    "Intersect works",
+    "Exclude works"
+  ],
+  "outcome": ""
+}

@@ -1,0 +1,10 @@
+{
+  "name": "figma-crdt",
+  "purpose": "CRDT operations, apply, history",
+  "status": "complete",
+  "public_api": [],
+  "dependencies": [],
+  "files": [],
+  "known_issues": [],
+  "decisions": []
+}

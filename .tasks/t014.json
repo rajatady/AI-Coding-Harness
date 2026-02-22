@@ -1,0 +1,15 @@
+{
+  "id": "t014",
+  "title": "Auto-layout engine",
+  "status": "done",
+  "blocked_by": [],
+  "module": "figma-engine",
+  "subtasks": [],
+  "acceptance": [
+    "Horizontal layout",
+    "Vertical layout",
+    "Padding and spacing",
+    "Hug/fill sizing"
+  ],
+  "outcome": "Auto-layout engine: single-pass layout solver with horizontal/vertical, spacing, padding, hug/fill/fixed sizing, alignment."
+}

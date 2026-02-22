@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Figma Clone</title>
+    <link rel="stylesheet" href="/src/styles.css">
+</head>
+<body>
+    <div id="app">
+        <div id="toolbar">
+            <button class="tool-btn" data-action="add-frame">Frame</button>
+            <button class="tool-btn" data-action="add-rect">Rectangle</button>
+            <button class="tool-btn" data-action="add-ellipse">Ellipse</button>
+            <button class="tool-btn" data-action="add-text">Text</button>
+            <button class="tool-btn" data-action="pen">Pen</button>
+            <button class="tool-btn" data-action="delete">Delete</button>
+            <button class="tool-btn" data-action="add-image">Image</button>
+            <button class="tool-btn" data-action="export-png">Export PNG</button>
+            <button class="tool-btn" data-action="export-svg">Export SVG</button>
+            <button class="tool-btn" data-action="import-fig">Import</button>
+            <input type="file" id="image-file-input" accept="image/*" style="display:none" />
+            <input type="file" id="fig-file-input" accept=".json,.fig" style="display:none" />
+            <span id="info">Loading...</span>
+        </div>
+        <div id="workspace">
+            <div id="layers-panel" class="panel panel-left">
+                <div class="panel-header">Layers</div>
+                <div id="page-tabs"></div>
+                <div id="layers-list"></div>
+            </div>
+            <canvas id="canvas"></canvas>
+            <div id="properties-panel" class="panel panel-right">
+                <div class="panel-header">Properties</div>
+                <div id="properties-content"></div>
+            </div>
+        </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

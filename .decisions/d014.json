@@ -1,0 +1,8 @@
+{
+  "id": "d014",
+  "timestamp": "2026-02-21T20:15:26.260004",
+  "question": "How to prevent frankenstein edits",
+  "choice": "survey-before-edit workflow",
+  "why": "Experienced ~20 wasted tool calls editing rasterize.rs blind. New tools: survey (file skeleton ~30 tokens), coherence (detect bad files ~20 tokens), diff-check (what changed + check). Workflow: always survey before edit, always check after.",
+  "affects": []
+}

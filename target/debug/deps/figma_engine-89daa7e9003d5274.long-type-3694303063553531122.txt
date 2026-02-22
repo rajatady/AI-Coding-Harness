@@ -1,3 +1,0 @@
-<node::_::<impl Deserialize<'de> for CornerRadii>::deserialize::__Visitor<'de> as Visitor<'de>>::visit_enum::__Field
-<node::_::<impl Deserialize<'de> for NodeKind>::deserialize::__Visitor<'de> as Visitor<'de>>::visit_enum::__Field
-<node::_::<impl Deserialize<'de> for PathCommand>::deserialize::__Visitor<'de> as Visitor<'de>>::visit_enum::__Field

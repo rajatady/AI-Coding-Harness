@@ -1,0 +1,14 @@
+{
+  "id": "t013",
+  "title": "Gradient rendering",
+  "status": "done",
+  "blocked_by": [],
+  "module": "figma-renderer",
+  "subtasks": [],
+  "acceptance": [
+    "Linear gradients",
+    "Radial gradients",
+    "Multiple gradient stops"
+  ],
+  "outcome": "Gradient rendering already implemented via ColorSampler abstraction. Linear and radial gradients with multi-stop interpolation."
+}

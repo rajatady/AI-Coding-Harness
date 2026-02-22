@@ -1,0 +1,9 @@
+{
+  "id": "d005",
+  "timestamp": "2026-02-21T19:25:24.539738",
+  "question": "What is the single most important tool to build next?",
+  "choice": "Implementation journals with algorithmic state capture",
+  "why": "Pain 1 is the most devastating. Without it, every complex algorithm becomes a restart after compaction. The semantic index is useless if I cant remember what I was implementing.",
+  "alternatives_rejected": [],
+  "affects": []
+}

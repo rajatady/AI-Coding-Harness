@@ -1,0 +1,10 @@
+{
+  "name": "figma-renderer",
+  "purpose": "Tile-based renderer: scene graph, rasterization, compositing",
+  "status": "complete",
+  "public_api": [],
+  "dependencies": [],
+  "files": [],
+  "known_issues": [],
+  "decisions": []
+}

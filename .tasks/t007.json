@@ -1,0 +1,13 @@
+{
+  "id": "t007",
+  "title": "Define render pipeline contract",
+  "status": "done",
+  "blocked_by": [],
+  "module": "renderer",
+  "subtasks": [],
+  "acceptance": [
+    "Contract compiles",
+    "Pipeline stages are type-enforced"
+  ],
+  "outcome": "Full render pipeline: scene graph, tile-based rasterizer, compositing with all blend modes, WASM bindings. Compiles native+WASM."
+}

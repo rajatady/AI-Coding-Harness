@@ -1,0 +1,89 @@
+{
+  "tests": {
+    "empty_canvas": {
+      "width": 64,
+      "height": 64,
+      "hash": "8044679126188421741",
+      "coverage": "0/4096"
+    },
+    "single_red_rect": {
+      "width": 100,
+      "height": 100,
+      "hash": "17097126673812257270",
+      "coverage": "2500/10000"
+    },
+    "overlapping_rects_alpha": {
+      "width": 100,
+      "height": 100,
+      "hash": "5501143475239986111",
+      "coverage": "6400/10000"
+    },
+    "ellipse_center": {
+      "width": 100,
+      "height": 100,
+      "hash": "10657061856127371899",
+      "coverage": "3760/10000"
+    },
+    "triangle_path": {
+      "width": 100,
+      "height": 100,
+      "hash": "11818873307622304359",
+      "coverage": "3200/10000"
+    },
+    "rotated_rect": {
+      "width": 100,
+      "height": 100,
+      "hash": "17499833608304558574",
+      "coverage": "1596/10000"
+    },
+    "linear_gradient_rect": {
+      "width": 100,
+      "height": 50,
+      "hash": "5932465268006966044",
+      "coverage": "5000/5000"
+    },
+    "radial_gradient_rect": {
+      "width": 100,
+      "height": 100,
+      "hash": "5300182983069550755",
+      "coverage": "10000/10000"
+    },
+    "boolean_subtract": {
+      "width": 100,
+      "height": 100,
+      "hash": "4121862034910396954",
+      "coverage": "4800/10000"
+    },
+    "text_renders_pixels": {
+      "width": 200,
+      "height": 50,
+      "hash": "13650133320673016592",
+      "coverage": "263/10000"
+    },
+    "boolean_union": {
+      "width": 100,
+      "height": 100,
+      "hash": "11468998146937384705",
+      "coverage": "4000/10000"
+    },
+    "image_node_pixel_sampling": {
+      "width": 64,
+      "height": 64,
+      "hash": "5357051810636527615",
+      "coverage": "1200/4096"
+    },
+    "rounded_rect_corners": {
+      "width": 100,
+      "height": 100,
+      "hash": "18268975419497477989",
+      "coverage": "4616/10000"
+    },
+    "frame_clips_children": {
+      "width": 100,
+      "height": 100,
+      "hash": "5180828873479084651",
+      "coverage": "1600/10000"
+    }
+  },
+  "summary": "0,0,14"
+}

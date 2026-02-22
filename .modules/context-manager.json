@@ -1,0 +1,11 @@
+{
+  "name": "context-manager",
+  "purpose": "Ranks relevant files/symbols for a task",
+  "status": "not-started",
+  "public_api": [],
+  "dependencies": [],
+  "files": [],
+  "tests": "",
+  "known_issues": [],
+  "decisions": []
+}

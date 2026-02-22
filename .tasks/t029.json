@@ -1,0 +1,12 @@
+{
+  "id": "t029",
+  "title": "IDE tool: Ratio display in orient",
+  "status": "done",
+  "blocked_by": [],
+  "module": "ide-tooling",
+  "subtasks": [],
+  "acceptance": [
+    "orient shows IDE:Figma ratio and enforces next-task type"
+  ],
+  "outcome": "removed \u2014 metric gaming, no real value"
+}

@@ -1,0 +1,13 @@
+{
+  "id": "t018",
+  "title": "Export: SVG, PNG",
+  "status": "pending",
+  "blocked_by": [],
+  "module": "figma-engine",
+  "subtasks": [],
+  "acceptance": [
+    "Document exports to SVG string",
+    "Renders to PNG bytes"
+  ],
+  "outcome": ""
+}

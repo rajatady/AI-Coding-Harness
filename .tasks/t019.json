@@ -1,0 +1,14 @@
+{
+  "id": "t019",
+  "title": "Component/Instance system",
+  "status": "pending",
+  "blocked_by": [],
+  "module": "figma-engine",
+  "subtasks": [],
+  "acceptance": [
+    "Can define components",
+    "Instances reflect source",
+    "Override system works"
+  ],
+  "outcome": ""
+}

@@ -1,0 +1,9 @@
+{
+  "id": "d002",
+  "timestamp": "2026-02-21T19:08:05.095890",
+  "question": "How to persist project state?",
+  "choice": "Structured JSON files in .decisions/ .tasks/ .modules/ + STATE.md for orientation",
+  "why": "Must be readable by AI with Read tool, no database, no daemon, always available",
+  "alternatives_rejected": [],
+  "affects": []
+}

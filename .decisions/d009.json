@@ -1,0 +1,8 @@
+{
+  "id": "d009",
+  "timestamp": "2026-02-21T19:34:18.441386",
+  "question": "Cargo workspace structure for Figma clone?",
+  "choice": "Single workspace, multiple crates: engine (core types+logic), renderer (WebGPU/Canvas), crdt (collaboration), wasm (browser bindings)",
+  "why": "Crate boundaries = module boundaries = type-enforced contracts. Changing a type in engine forces renderer+crdt to adapt at compile time. The compiler enforces integration.",
+  "affects": []
+}

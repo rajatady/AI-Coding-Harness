@@ -1,0 +1,15 @@
+{
+  "id": "t011",
+  "title": "Interactive canvas: selection, drag, resize",
+  "status": "done",
+  "blocked_by": [],
+  "module": "figma-wasm",
+  "subtasks": [],
+  "acceptance": [
+    "Click to select nodes",
+    "Drag to move",
+    "Handles to resize",
+    "Keyboard shortcuts"
+  ],
+  "outcome": "Interactive canvas: click-to-select with hit testing, drag to move, add rectangles, delete selected. All verified via automated browser tests."
+}

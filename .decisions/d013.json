@@ -1,0 +1,8 @@
+{
+  "id": "d013",
+  "timestamp": "2026-02-21T19:56:35.083749",
+  "question": "How to verify rendering without visual inspection?",
+  "choice": "Deterministic pixel tests. Render a known scene to a buffer, hash the output, compare to expected hash. One comparison = one line of output = ~10 tokens. Also: render single pixels and assert exact RGBA values for edge cases.",
+  "why": "Taking a screenshot cost ~2000 tokens and told me nothing the compiler didnt already guarantee. A hash comparison costs 10 tokens and gives a binary PASS/FAIL.",
+  "affects": []
+}

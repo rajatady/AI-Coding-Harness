@@ -1,0 +1,14 @@
+{
+  "id": "t017",
+  "title": "Text rendering with font shaping",
+  "status": "done",
+  "blocked_by": [],
+  "module": "figma-renderer",
+  "subtasks": [],
+  "acceptance": [
+    "Single-style text renders",
+    "Multi-run styled text",
+    "Text wrapping"
+  ],
+  "outcome": ""
+}

@@ -1,0 +1,14 @@
+{
+  "id": "t015",
+  "title": "Undo/redo system",
+  "status": "done",
+  "blocked_by": [],
+  "module": "figma-crdt",
+  "subtasks": [],
+  "acceptance": [
+    "Undo reverses last local operation",
+    "Redo re-applies",
+    "Works with all operation types"
+  ],
+  "outcome": "Undo/redo via inverse operations. compute_inverse generates the reverse of any operation before applying. History stores op+inverse pairs. Undo pops inverse, redo re-applies original."
+}

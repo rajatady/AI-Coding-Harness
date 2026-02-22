@@ -1,0 +1,2722 @@
+#!/usr/bin/env python3
+"""
+AI-Native IDE — Correctness Construction System.
+
+NOT a project tracker. NOT a test runner.
+A system that helps AI write code that CANNOT be wrong.
+
+Core principle: every verification should cost near-zero context.
+Types verify for free. Compilation is a binary signal.
+Rich error output is a human luxury I can't afford.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+from datetime import datetime
+from pathlib import Path
+from textwrap import dedent
+
+IDE_ROOT = Path(__file__).parent.resolve()
+DECISIONS_DIR = IDE_ROOT / ".decisions"
+TASKS_DIR = IDE_ROOT / ".tasks"
+MODULES_DIR = IDE_ROOT / ".modules"
+CONTRACTS_DIR = IDE_ROOT / ".contracts"
+JOURNALS_DIR = IDE_ROOT / ".journals"
+
+for d in [DECISIONS_DIR, TASKS_DIR, MODULES_DIR, CONTRACTS_DIR, JOURNALS_DIR]:
+    d.mkdir(exist_ok=True)
+
+
+def load_json(path: Path) -> dict:
+    with open(path) as f:
+        return json.load(f)
+
+
+def save_json(path: Path, data: dict):
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+# ─── orient ──────────────────────────────────────────────────────────────
+def cmd_orient(args):
+    """
+    Focused orientation. Costs ~200 tokens instead of 1000+.
+    Usage:
+        ./ide orient          — minimal: active task + next task only
+        ./ide orient full     — everything (expensive, avoid)
+        ./ide orient <module> — just that module's state
+    """
+    mode = args[0] if args else "minimal"
+
+    if mode == "minimal":
+        # Active task only
+        active = None
+        next_ready = None
+        for f in sorted(TASKS_DIR.glob("*.json")):
+            t = load_json(f)
+            if t["status"] == "active" and not active:
+                active = t
+            if t["status"] == "pending" and not t.get("blocked_by") and not next_ready:
+                next_ready = t
+
+        if active:
+            print(f"ACTIVE: [{active['id']}] {active['title']}")
+            if active.get("module"):
+                print(f"  module: {active['module']}")
+            for i, s in enumerate(active.get("subtasks", [])):
+                mark = "x" if s.get("done") else " "
+                print(f"  [{mark}] {i}: {s['title']}")
+            # Show journal if one exists for this task
+            journal_path = JOURNALS_DIR / f"{active['id']}.md"
+            if journal_path.exists():
+                content = journal_path.read_text().strip()
+                # Show only — compact, not the whole file
+                lines = content.split("\n")
+                for line in lines[:15]:  # Max 15 lines
+                    print(f"  | {line}")
+                if len(lines) > 15:
+                    print(f"  | ... ({len(lines) - 15} more lines)")
+        else:
+            print("ACTIVE: (none)")
+
+        if next_ready:
+            print(f"NEXT: [{next_ready['id']}] {next_ready['title']}")
+
+        # Compile status if cargo project exists
+        cargo_toml = IDE_ROOT / "Cargo.toml"
+        if cargo_toml.exists():
+            result = subprocess.run(
+                ["cargo", "check", "--message-format=short"],
+                capture_output=True, text=True, cwd=IDE_ROOT, timeout=120
+            )
+            if result.returncode == 0:
+                print("BUILD: OK")
+            else:
+                # Extract just the first error
+                lines = result.stderr.strip().split("\n")
+                first_error = None
+                for line in lines:
+                    if "error[" in line or "error:" in line:
+                        first_error = line.strip()
+                        break
+                print(f"BUILD: FAIL — {first_error or 'unknown error'}")
+
+    elif mode == "full":
+        # Everything — expensive, use sparingly
+        print("=== FULL ORIENTATION ===")
+        for f in sorted(TASKS_DIR.glob("*.json")):
+            t = load_json(f)
+            status_mark = {"active": ">>", "pending": "  ", "done": "OK", "blocked": "BL"}.get(t["status"], "??")
+            blocked = f" (blocked: {','.join(t['blocked_by'])})" if t.get("blocked_by") else ""
+            print(f"  {status_mark} [{t['id']}] {t['title']}{blocked}")
+        print()
+        for f in sorted(MODULES_DIR.glob("*.json")):
+            m = load_json(f)
+            print(f"  [{m['status']}] {m['name']}: {m['purpose']}")
+        print()
+        dec_files = sorted(DECISIONS_DIR.glob("*.json"), key=os.path.getmtime, reverse=True)[:5]
+        for f in dec_files:
+            d = load_json(f)
+            print(f"  {d['id']}: {d['choice']} — {d['why'][:80]}")
+
+    else:
+        # Module-specific orientation
+        mod_path = MODULES_DIR / f"{mode}.json"
+        if not mod_path.exists():
+            print(f"Module '{mode}' not found")
+            sys.exit(1)
+        m = load_json(mod_path)
+        print(f"MODULE: {m['name']} [{m['status']}]")
+        print(f"PURPOSE: {m['purpose']}")
+        if m.get("files"):
+            print(f"FILES: {', '.join(m['files'])}")
+        if m.get("public_api"):
+            print("API:")
+            for api in m["public_api"]:
+                print(f"  {api['name']}: {api['signature']}")
+        if m.get("dependencies"):
+            print(f"DEPS: {', '.join(m['dependencies'])}")
+        if m.get("known_issues"):
+            print(f"ISSUES: {len(m['known_issues'])}")
+            for issue in m["known_issues"]:
+                print(f"  - {issue}")
+        # Show related contract
+        contract_path = CONTRACTS_DIR / f"{mode}.rs"
+        if contract_path.exists():
+            print(f"CONTRACT: {contract_path}")
+
+
+# ─── check ───────────────────────────────────────────────────────────────
+def cmd_check(args):
+    """
+    Binary compilation check. THE most important tool.
+    Returns: OK or FAIL + first error only.
+    Cost: ~20-50 tokens. Compare to running tests: ~500-5000 tokens.
+
+    Usage:
+        ./ide check           — cargo check (type verification)
+        ./ide check build     — cargo build (full compilation)
+        ./ide check wasm      — cargo build --target wasm32-unknown-unknown
+        ./ide check test      — cargo test, but ONLY pass/fail count
+        ./ide check render    — deterministic pixel verification
+        ./ide check spec      — apple_website.rs executable spec (release)
+        ./ide check perf      — 80K objects benchmark only
+        ./ide check clippy    — cargo clippy, only error count + first error
+        ./ide check ts        — TypeScript type check
+    """
+    mode = args[0] if args else "check"
+    cargo_toml = IDE_ROOT / "Cargo.toml"
+    if not cargo_toml.exists():
+        print("NO_CARGO")
+        return
+
+    if mode == "all":
+        # Check everything: Rust + WASM + TypeScript + Tests + FPS + Workflow
+        for m in ["check", "wasm", "ts", "test", "fps", "workflow"]:
+            cmd_check([m])
+        return
+
+    if mode == "check":
+        result = subprocess.run(
+            ["cargo", "check", "--message-format=short"],
+            capture_output=True, text=True, cwd=IDE_ROOT, timeout=120
+        )
+        if result.returncode == 0:
+            print("CHECK: OK")
+        else:
+            _print_first_error(result.stderr)
+
+    elif mode == "build":
+        result = subprocess.run(
+            ["cargo", "build", "--message-format=short"],
+            capture_output=True, text=True, cwd=IDE_ROOT, timeout=180
+        )
+        if result.returncode == 0:
+            print("BUILD: OK")
+        else:
+            _print_first_error(result.stderr)
+
+    elif mode == "wasm":
+        # Full pipeline: cargo build + wasm-bindgen
+        result = subprocess.run(
+            ["cargo", "build", "-p", "figma-wasm", "--target", "wasm32-unknown-unknown",
+             "--release", "--message-format=short"],
+            capture_output=True, text=True, cwd=IDE_ROOT, timeout=180
+        )
+        if result.returncode != 0:
+            _print_first_error(result.stderr)
+            return
+
+        wasm_file = IDE_ROOT / "target" / "wasm32-unknown-unknown" / "release" / "figma_wasm.wasm"
+        out_dir = IDE_ROOT / "app" / "pkg"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        result2 = subprocess.run(
+            ["wasm-bindgen", str(wasm_file), "--out-dir", str(out_dir), "--target", "web"],
+            capture_output=True, text=True, timeout=30
+        )
+        if result2.returncode != 0:
+            print(f"WASM: BUILD OK, BINDGEN FAIL — {result2.stderr.strip()[:150]}")
+        else:
+            print("WASM: OK (built + bound)")
+
+    elif mode == "test":
+        result = subprocess.run(
+            ["cargo", "test", "--", "--format=terse"],
+            capture_output=True, text=True, cwd=IDE_ROOT, timeout=300
+        )
+        combined = result.stdout + result.stderr
+        # Sum ALL "test result:" lines across crates
+        matches = re.findall(r"test result: (\w+)\. (\d+) passed; (\d+) failed", combined)
+        if matches:
+            total_passed = sum(int(m[1]) for m in matches)
+            total_failed = sum(int(m[2]) for m in matches)
+            status = "FAIL" if total_failed > 0 else "OK"
+            print(f"TEST: {status} — {total_passed} passed, {total_failed} failed")
+            if total_failed > 0:
+                for line in combined.split("\n"):
+                    if "FAILED" in line or "panicked" in line:
+                        print(f"  FIRST FAIL: {line.strip()[:120]}")
+                        break
+        elif result.returncode == 0:
+            print("TEST: OK (no tests found)")
+        else:
+            print("TEST: FAIL (compilation error)")
+            _print_first_error(result.stderr)
+
+    elif mode == "render":
+        # Run render verification binary + snapshot diff in one command
+        result = subprocess.run(
+            ["cargo", "run", "--bin", "render_verify"],
+            capture_output=True, text=True, cwd=IDE_ROOT, timeout=120
+        )
+        for line in result.stdout.strip().split("\n"):
+            if line.startswith("RENDER:"):
+                print(line)
+        if result.returncode != 0:
+            for line in result.stderr.strip().split("\n"):
+                if "FAIL" in line:
+                    print(line.strip()[:150])
+                    break
+        # Also run snapshot diff if baseline exists
+        baseline = SNAPSHOTS_DIR / "baseline.json"
+        if baseline.exists():
+            current = _run_snapshot_export()
+            if current:
+                bl = load_json(baseline)
+                bl_tests = bl.get("tests", {})
+                cu_tests = current.get("tests", {})
+                changed = [n for n in cu_tests if n in bl_tests and bl_tests[n]["hash"] != cu_tests[n]["hash"]]
+                if changed:
+                    print(f"SNAPSHOT: {len(changed)} changed: {', '.join(changed)}")
+                else:
+                    print(f"SNAPSHOT: OK")
+
+    elif mode == "ts":
+        app_dir = IDE_ROOT / "app"
+        if not app_dir.exists():
+            print("TS: NO_APP_DIR")
+            return
+        result = subprocess.run(
+            ["npx", "tsc", "--noEmit", "--pretty", "false"],
+            capture_output=True, text=True, cwd=app_dir, timeout=60
+        )
+        if result.returncode == 0:
+            print("TS: OK")
+        else:
+            lines = result.stdout.strip().split("\n")
+            errors = [l for l in lines if ": error " in l]
+            print(f"TS: {len(errors)} errors")
+            if errors:
+                print(f"  FIRST: {errors[0].strip()[:150]}")
+
+    elif mode == "clippy":
+        result = subprocess.run(
+            ["cargo", "clippy", "--message-format=short", "--", "-D", "warnings"],
+            capture_output=True, text=True, cwd=IDE_ROOT, timeout=120
+        )
+        if result.returncode == 0:
+            print("CLIPPY: OK")
+        else:
+            errors = [l for l in result.stderr.split("\n") if "error" in l.lower() or "warning" in l.lower()]
+            print(f"CLIPPY: {len(errors)} issues")
+            if errors:
+                print(f"  FIRST: {errors[0].strip()[:120]}")
+
+    elif mode == "spec":
+        # Run the executable specification (apple_website.rs) in release mode
+        result = subprocess.run(
+            ["cargo", "test", "-p", "figma-renderer", "--test", "apple_website",
+             "--release", "--", "--nocapture"],
+            capture_output=True, text=True, cwd=IDE_ROOT, timeout=300
+        )
+        combined = result.stdout + result.stderr
+        # Extract test results
+        matches = re.findall(r"test result: (\w+)\. (\d+) passed; (\d+) failed", combined)
+        if matches:
+            total_passed = sum(int(m[1]) for m in matches)
+            total_failed = sum(int(m[2]) for m in matches)
+            # Extract perf numbers if present
+            perf = ""
+            for line in combined.split("\n"):
+                if "TOTAL:" in line:
+                    perf = f" | {line.strip()}"
+                    break
+            status = "FAIL" if total_failed > 0 else "OK"
+            print(f"SPEC: {status} — {total_passed} passed, {total_failed} failed{perf}")
+            if total_failed > 0:
+                for line in combined.split("\n"):
+                    if "FAILED" in line or "panicked" in line or "RENDER TOO SLOW" in line:
+                        print(f"  {line.strip()[:150]}")
+                        break
+        elif result.returncode == 0:
+            print("SPEC: OK (no tests found)")
+        else:
+            print("SPEC: FAIL (compilation error)")
+            _print_first_error(result.stderr)
+
+    elif mode == "perf":
+        # Run just the 80K performance benchmark
+        result = subprocess.run(
+            ["cargo", "test", "-p", "figma-renderer", "--test", "apple_website",
+             "p8_80k", "--release", "--", "--nocapture"],
+            capture_output=True, text=True, cwd=IDE_ROOT, timeout=300
+        )
+        combined = result.stdout + result.stderr
+        for line in combined.split("\n"):
+            if "TOTAL:" in line or "80K objects" in line:
+                print(line.strip())
+        if result.returncode != 0:
+            print("PERF: FAIL")
+            for line in combined.split("\n"):
+                if "RENDER TOO SLOW" in line or "panicked" in line:
+                    print(f"  {line.strip()[:150]}")
+                    break
+        else:
+            print("PERF: OK")
+
+    elif mode == "visual":
+        # Build WASM first, then run visual check
+        cmd_check(["wasm"])
+        cmd_visual(args)
+
+    elif mode == "fps":
+        # Build WASM first, then measure fps
+        cmd_check(["wasm"])
+        cmd_fps(args)
+
+    elif mode == "workflow":
+        # Build WASM first, then run workflow tests
+        cmd_check(["wasm"])
+        cmd_workflow(args)
+
+    else:
+        print(f"Unknown check mode: {mode}")
+        print("Modes: check, build, wasm, test, render, spec, perf, ts, clippy, visual, fps, workflow, all")
+
+
+def _print_first_error(stderr: str):
+    """Extract and print only the first error. Minimal context cost."""
+    lines = stderr.strip().split("\n")
+    for line in lines:
+        if "error[" in line or (line.startswith("error") and ":" in line):
+            print(f"FAIL: {line.strip()[:150]}")
+            return
+    # Fallback: first non-empty line
+    for line in lines:
+        if line.strip():
+            print(f"FAIL: {line.strip()[:150]}")
+            return
+    print("FAIL: unknown")
+
+
+# ─── contract ────────────────────────────────────────────────────────────
+def cmd_contract(args):
+    """
+    Generate and manage type contracts.
+    A contract is a Rust trait + types that ENFORCE module boundaries.
+    If it compiles, the contract is satisfied. Zero-cost verification.
+
+    Usage:
+        ./ide contract create <module> <description>
+            — generates .contracts/<module>.rs with trait skeleton
+        ./ide contract show <module>
+            — display the contract
+        ./ide contract check <module>
+            — verify the contract compiles (binary signal)
+        ./ide contract list
+            — list all contracts with compile status
+    """
+    if not args:
+        print("Usage: ./ide contract <create|show|check|list> ...")
+        sys.exit(1)
+    sub = args[0]
+
+    if sub == "create":
+        name = args[1]
+        desc = args[2] if len(args) > 2 else ""
+        contract_path = CONTRACTS_DIR / f"{name}.rs"
+        # Generate skeleton with the description as doc comment
+        content = dedent(f"""\
+            //! Contract for module: {name}
+            //! {desc}
+            //!
+            //! This file defines the TYPE-LEVEL CONTRACT for this module.
+            //! If this compiles, the contract is enforced.
+            //! Implementors must satisfy these trait bounds.
+
+            // TODO: Define the trait that enforces this module's guarantees.
+            // The types should make incorrect implementations UNCOMPILABLE.
+            //
+            // Example patterns:
+            //   - Typestate pattern: encode valid states in the type system
+            //   - Phantom types: tag data with compile-time properties
+            //   - Sealed traits: prevent external implementation
+            //   - Const generics: encode numeric constraints in types
+        """)
+        contract_path.write_text(content)
+        print(f"Contract created: {contract_path}")
+
+    elif sub == "show":
+        name = args[1]
+        contract_path = CONTRACTS_DIR / f"{name}.rs"
+        if contract_path.exists():
+            print(contract_path.read_text())
+        else:
+            print(f"No contract for '{name}'")
+
+    elif sub == "check":
+        name = args[1]
+        contract_path = CONTRACTS_DIR / f"{name}.rs"
+        if not contract_path.exists():
+            print(f"No contract for '{name}'")
+            return
+        # Try to compile just this file
+        result = subprocess.run(
+            ["rustc", "--edition=2021", "--crate-type=lib", str(contract_path), "-o", "/dev/null"],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0:
+            print(f"CONTRACT {name}: OK")
+        else:
+            _print_first_error(result.stderr)
+
+    elif sub == "list":
+        for f in sorted(CONTRACTS_DIR.glob("*.rs")):
+            name = f.stem
+            result = subprocess.run(
+                ["rustc", "--edition=2021", "--crate-type=lib", str(f), "-o", "/dev/null"],
+                capture_output=True, text=True, timeout=30
+            )
+            status = "OK" if result.returncode == 0 else "FAIL"
+            print(f"  [{status}] {name}")
+
+    else:
+        print(f"Unknown contract subcommand: {sub}")
+
+
+# ─── scaffold ────────────────────────────────────────────────────────────
+def cmd_scaffold(args):
+    """
+    Generate Rust module skeleton from a contract.
+    The skeleton includes all required type definitions and trait impls
+    with todo!() bodies. If the skeleton compiles, the structure is correct.
+    I only need to fill in logic.
+
+    Usage:
+        ./ide scaffold <module-name> <output-dir>
+    """
+    if len(args) < 2:
+        print("Usage: ./ide scaffold <module-name> <output-dir>")
+        sys.exit(1)
+    name = args[0]
+    output_dir = Path(args[1])
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    contract_path = CONTRACTS_DIR / f"{name}.rs"
+    if not contract_path.exists():
+        print(f"No contract for '{name}'. Create one first: ./ide contract create {name}")
+        sys.exit(1)
+
+    # Read contract, extract trait definitions
+    contract_text = contract_path.read_text()
+
+    # Generate mod.rs that includes the contract and stubs
+    mod_path = output_dir / "mod.rs"
+    content = dedent(f"""\
+        //! Module: {name}
+        //! Generated from contract. Fill in the todo!() implementations.
+
+        // Include the contract (type-level guarantees)
+        // mod contract; // Uncomment when contract is integrated into crate
+
+        // TODO: Implement the traits defined in the contract.
+        // The type signatures are your guide. If it compiles, it's structurally correct.
+        // Focus ONLY on filling in logic — the types prevent structural errors.
+    """)
+    mod_path.write_text(content)
+    print(f"Scaffold created: {output_dir}/mod.rs")
+    print(f"Next: implement traits from {contract_path}")
+
+
+# ─── decide (kept — cheap and prevents re-debates) ──────────────────────
+def cmd_decide(args):
+    if len(args) < 4:
+        print("Usage: ./ide decide <id> <question> <choice> <why> [affects...]")
+        sys.exit(1)
+    decision = {
+        "id": args[0],
+        "timestamp": datetime.now().isoformat(),
+        "question": args[1],
+        "choice": args[2],
+        "why": args[3],
+        "affects": args[4:] if len(args) > 4 else [],
+    }
+    save_json(DECISIONS_DIR / f"{args[0]}.json", decision)
+    print(f"Decided: {args[0]}")
+
+
+# ─── task (simplified — just active/next, no bloat) ─────────────────────
+def cmd_task(args):
+    if not args:
+        print("Usage: ./ide task <add|start|done|block|list> ...")
+        sys.exit(1)
+    sub = args[0]
+
+    if sub == "add":
+        if len(args) < 4:
+            print("Usage: ./ide task add <id> <title> <module> [acceptance...]")
+            sys.exit(1)
+        task = {
+            "id": args[1], "title": args[2], "status": "pending",
+            "blocked_by": [], "module": args[3],
+            "subtasks": [],
+            "acceptance": args[4:] if len(args) > 4 else [],
+            "outcome": "",
+        }
+        save_json(TASKS_DIR / f"{args[1]}.json", task)
+        print(f"Task: {args[1]}")
+
+    elif sub == "start":
+        path = TASKS_DIR / f"{args[1]}.json"
+        t = load_json(path)
+        t["status"] = "active"
+        save_json(path, t)
+        print(f"Started: {args[1]}")
+
+    elif sub == "done":
+        path = TASKS_DIR / f"{args[1]}.json"
+        t = load_json(path)
+        t["status"] = "done"
+        t["outcome"] = args[2] if len(args) > 2 else ""
+        save_json(path, t)
+        print(f"Done: {args[1]}")
+        for f in TASKS_DIR.glob("*.json"):
+            other = load_json(f)
+            if args[1] in other.get("blocked_by", []):
+                other["blocked_by"].remove(args[1])
+                save_json(f, other)
+                print(f"  Unblocked: {other['id']}")
+
+    elif sub == "block":
+        path = TASKS_DIR / f"{args[1]}.json"
+        t = load_json(path)
+        if args[2] not in t["blocked_by"]:
+            t["blocked_by"].append(args[2])
+        save_json(path, t)
+        print(f"Blocked: {args[1]} by {args[2]}")
+
+    elif sub == "subtask":
+        path = TASKS_DIR / f"{args[1]}.json"
+        t = load_json(path)
+        t["subtasks"].append({"title": args[2], "done": False})
+        save_json(path, t)
+        print(f"Subtask: {args[2]}")
+
+    elif sub == "subtask-done":
+        path = TASKS_DIR / f"{args[1]}.json"
+        t = load_json(path)
+        t["subtasks"][int(args[2])]["done"] = True
+        save_json(path, t)
+
+    elif sub == "list":
+        for f in sorted(TASKS_DIR.glob("*.json")):
+            t = load_json(f)
+            if t["status"] != "done":
+                bl = f" [blocked:{','.join(t['blocked_by'])}]" if t.get("blocked_by") else ""
+                print(f"  {t['status']:7} [{t['id']}] {t['title']}{bl}")
+
+
+# ─── module (kept — lightweight) ────────────────────────────────────────
+def cmd_module(args):
+    if not args:
+        print("Usage: ./ide module <register|api|status|issue|dep|file|show> ...")
+        sys.exit(1)
+    sub = args[0]
+    if sub == "register":
+        mod = {
+            "name": args[1], "purpose": args[2],
+            "status": args[3] if len(args) > 3 else "not-started",
+            "public_api": [], "dependencies": [], "files": [],
+            "known_issues": [], "decisions": [],
+        }
+        save_json(MODULES_DIR / f"{args[1]}.json", mod)
+        print(f"Module: {args[1]}")
+    elif sub == "api":
+        path = MODULES_DIR / f"{args[1]}.json"
+        m = load_json(path)
+        m["public_api"].append({"name": args[2], "signature": args[3], "purpose": args[4]})
+        save_json(path, m)
+    elif sub == "status":
+        path = MODULES_DIR / f"{args[1]}.json"
+        m = load_json(path)
+        m["status"] = args[2]
+        save_json(path, m)
+        print(f"{args[1]} → {args[2]}")
+    elif sub == "dep":
+        path = MODULES_DIR / f"{args[1]}.json"
+        m = load_json(path)
+        if args[2] not in m["dependencies"]:
+            m["dependencies"].append(args[2])
+        save_json(path, m)
+    elif sub == "file":
+        path = MODULES_DIR / f"{args[1]}.json"
+        m = load_json(path)
+        if args[2] not in m["files"]:
+            m["files"].append(args[2])
+        save_json(path, m)
+    elif sub == "issue":
+        path = MODULES_DIR / f"{args[1]}.json"
+        m = load_json(path)
+        m["known_issues"].append(args[2])
+        save_json(path, m)
+    elif sub == "show":
+        m = load_json(MODULES_DIR / f"{args[1]}.json")
+        print(json.dumps(m, indent=2))
+
+
+# ─── verify (redesigned — binary signals) ───────────────────────────────
+def cmd_verify(args):
+    """
+    Full verification sweep. Returns structured, minimal output.
+    Cost: ~100-200 tokens total even for a large project.
+    """
+    issues = []
+
+    # Compile check
+    cargo_toml = IDE_ROOT / "Cargo.toml"
+    if cargo_toml.exists():
+        result = subprocess.run(
+            ["cargo", "check", "--message-format=short"],
+            capture_output=True, text=True, cwd=IDE_ROOT, timeout=120
+        )
+        if result.returncode != 0:
+            issues.append("COMPILE: FAIL")
+        else:
+            # Also check wasm target
+            result = subprocess.run(
+                ["cargo", "check", "--target", "wasm32-unknown-unknown", "--message-format=short"],
+                capture_output=True, text=True, cwd=IDE_ROOT, timeout=120
+            )
+            if result.returncode != 0:
+                issues.append("WASM: FAIL")
+
+    # Contract compilation
+    for f in CONTRACTS_DIR.glob("*.rs"):
+        result = subprocess.run(
+            ["rustc", "--edition=2021", "--crate-type=lib", str(f), "-o", "/dev/null"],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode != 0:
+            issues.append(f"CONTRACT {f.stem}: FAIL")
+
+    # Task integrity
+    task_ids = {f.stem for f in TASKS_DIR.glob("*.json")}
+    for f in TASKS_DIR.glob("*.json"):
+        t = load_json(f)
+        for dep in t.get("blocked_by", []):
+            if dep not in task_ids:
+                issues.append(f"TASK {t['id']}: blocked by missing {dep}")
+
+    # Module health
+    for f in MODULES_DIR.glob("*.json"):
+        m = load_json(f)
+        if m["status"] == "complete" and m.get("known_issues"):
+            issues.append(f"MODULE {m['name']}: complete but has issues")
+
+    if not issues:
+        print("VERIFY: ALL OK")
+    else:
+        print(f"VERIFY: {len(issues)} ISSUES")
+        for issue in issues:
+            print(f"  {issue}")
+
+
+# ─── survey ──────────────────────────────────────────────────────────────
+def cmd_survey(args):
+    """
+    Structural skeleton of a Rust file. ~20-40 tokens output.
+    Shows WHAT EXISTS without reading the full file.
+
+    This prevents the #1 pain: editing a file you don't understand.
+    Read the survey BEFORE any edit. Know the shape.
+
+    Usage:
+        ./ide survey <file>              — skeleton of one file
+        ./ide survey <crate-dir>/src/    — skeleton of all files in a module
+    """
+    if not args:
+        print("Usage: ./ide survey <file-or-dir>")
+        sys.exit(1)
+
+    target = Path(args[0])
+    if target.is_dir():
+        for f in sorted(target.rglob("*.rs")):
+            _survey_file(f)
+            print()
+    elif target.is_file():
+        _survey_file(target)
+    else:
+        print(f"Not found: {target}")
+        sys.exit(1)
+
+
+def _survey_file(path: Path):
+    """Extract structural skeleton from a Rust file. Minimal output."""
+    try:
+        lines = path.read_text().splitlines()
+    except Exception as e:
+        print(f"ERR: {e}")
+        return
+
+    rel = path.relative_to(IDE_ROOT) if str(path).startswith(str(IDE_ROOT)) else path
+    print(f"── {rel} ({len(lines)} lines) ──")
+
+    for i, line in enumerate(lines, 1):
+        stripped = line.strip()
+        # Skip empty lines, comments, use statements, attributes
+        if not stripped or stripped.startswith("//") or stripped.startswith("use ") or stripped.startswith("#["):
+            continue
+
+        # Module declarations
+        if stripped.startswith("pub mod ") or stripped.startswith("mod "):
+            print(f"  {i}: {stripped}")
+            continue
+
+        # Struct/enum/trait declarations
+        for kw in ["pub struct ", "struct ", "pub enum ", "enum ", "pub trait ", "trait "]:
+            if stripped.startswith(kw):
+                # Include up to opening brace or semicolon
+                print(f"  {i}: {stripped.split('{')[0].strip()}")
+                break
+
+        # Function/method signatures
+        for kw in ["pub fn ", "fn ", "pub async fn ", "async fn ", "pub const fn ", "const fn ", "pub unsafe fn "]:
+            if stripped.startswith(kw) or (stripped.startswith("pub(crate) fn ") or stripped.startswith("pub(super) fn ")):
+                # Extract up to opening brace
+                sig = stripped.split('{')[0].strip()
+                if sig.endswith(')') or sig.endswith('-> '):
+                    # Multi-line signature, just show what we have
+                    pass
+                print(f"  {i}: {sig}")
+                break
+
+        # Impl blocks
+        if stripped.startswith("impl ") or stripped.startswith("impl<"):
+            block = stripped.split('{')[0].strip()
+            print(f"  {i}: {block}")
+
+
+# ─── diff-check ──────────────────────────────────────────────────────────
+def cmd_diff_check(args):
+    """
+    Show what changed since last cargo check, then check.
+    Catches the pattern: "I edited 3 things, which one broke it?"
+
+    Usage:
+        ./ide diff-check    — show changed files + cargo check
+    """
+    # What files changed since last build?
+    # Use cargo's fingerprinting: if target/ exists, check mtime
+    cargo_toml = IDE_ROOT / "Cargo.toml"
+    if not cargo_toml.exists():
+        print("NO_CARGO")
+        return
+
+    # Find recently modified .rs files (last 5 minutes)
+    import time
+    cutoff = time.time() - 300  # 5 minutes
+    changed = []
+    for f in IDE_ROOT.rglob("*.rs"):
+        if "target" in f.parts:
+            continue
+        if f.stat().st_mtime > cutoff:
+            rel = f.relative_to(IDE_ROOT)
+            changed.append(str(rel))
+
+    if changed:
+        print(f"CHANGED ({len(changed)}):")
+        for c in changed[:10]:
+            print(f"  {c}")
+    else:
+        print("CHANGED: none (last 5min)")
+
+    # Now check
+    result = subprocess.run(
+        ["cargo", "check", "--message-format=short"],
+        capture_output=True, text=True, cwd=IDE_ROOT, timeout=120
+    )
+    if result.returncode == 0:
+        print("CHECK: OK")
+    else:
+        _print_first_error(result.stderr)
+
+
+# ─── coherence ───────────────────────────────────────────────────────────
+def cmd_coherence(args):
+    """
+    Detect files that may have been frankenstein'd by conflicting edits.
+    Looks for symptoms of incoherent editing:
+    - Duplicate pub/pub modifiers
+    - Functions referenced but not defined (within same file)
+    - Duplicate function names
+    - Unbalanced braces
+    - TODO/FIXME density (high = incomplete work)
+
+    Usage:
+        ./ide coherence <file>       — check one file
+        ./ide coherence              — check all .rs files
+    """
+    if args:
+        target = Path(args[0])
+        if target.is_file():
+            _check_coherence(target)
+        else:
+            print(f"Not found: {target}")
+    else:
+        issues_total = 0
+        for f in sorted(IDE_ROOT.rglob("*.rs")):
+            if "target" in f.parts:
+                continue
+            count = _check_coherence(f, quiet=True)
+            issues_total += count
+        if issues_total == 0:
+            print("COHERENCE: OK")
+        else:
+            print(f"COHERENCE: {issues_total} issues")
+
+
+def _check_coherence(path: Path, quiet: bool = False) -> int:
+    """Check a single file for coherence issues. Returns issue count."""
+    try:
+        text = path.read_text()
+        lines = text.splitlines()
+    except Exception:
+        return 0
+
+    rel = path.relative_to(IDE_ROOT) if str(path).startswith(str(IDE_ROOT)) else path
+    issues = []
+
+    # 1. Duplicate visibility modifiers (pub pub)
+    for i, line in enumerate(lines, 1):
+        if "pub pub " in line:
+            issues.append(f"  L{i}: duplicate 'pub pub'")
+
+    # 2. Unbalanced braces
+    open_b = text.count('{')
+    close_b = text.count('}')
+    if open_b != close_b:
+        issues.append(f"  braces: {open_b} open, {close_b} close (diff={open_b - close_b})")
+
+    # 3. Duplicate function definitions (scope-aware)
+    # Track which impl block we're in to avoid false positives on new(), etc.
+    fn_defs = []  # (scope, name, line)
+    current_scope = "top"
+    brace_depth = 0
+    scope_stack = ["top"]
+    for i, line in enumerate(lines, 1):
+        stripped = line.strip()
+        # Track impl blocks
+        impl_match = re.match(r'(?:#\[.*\]\s*)?impl(?:<[^>]*>)?\s+(\S+)', stripped)
+        if impl_match and '{' in line:
+            current_scope = impl_match.group(1)
+
+        # Match fn declarations
+        fn_match = re.match(r'(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:unsafe\s+)?(?:const\s+)?fn\s+(\w+)', stripped)
+        if fn_match:
+            fn_defs.append((current_scope, fn_match.group(1), i))
+
+        # Very rough brace tracking to detect when we leave an impl
+        brace_depth += line.count('{') - line.count('}')
+        if brace_depth <= 0:
+            current_scope = "top"
+            brace_depth = 0
+
+    # Only flag duplicates within the SAME scope
+    scope_fns = {}
+    for scope, name, lineno in fn_defs:
+        key = (scope, name)
+        if key in scope_fns:
+            issues.append(f"  L{lineno}: duplicate fn '{name}' in {scope} (first at L{scope_fns[key]})")
+        scope_fns[key] = lineno
+
+    # 4. TODO/FIXME density
+    todo_count = sum(1 for line in lines if 'TODO' in line or 'FIXME' in line or 'HACK' in line)
+    if todo_count > 5:
+        issues.append(f"  {todo_count} TODO/FIXME markers (high = incomplete)")
+
+    # 5. Dead imports (use X but X never referenced in rest of file)
+    # Lightweight check: just flag unusually high import count
+    imports = [l.strip() for l in lines if l.strip().startswith("use ")]
+    if len(imports) > 15:
+        issues.append(f"  {len(imports)} imports (unusually high)")
+
+    if issues:
+        print(f"── {rel}: {len(issues)} issues ──")
+        for issue in issues:
+            print(issue)
+    elif not quiet:
+        print(f"── {rel}: OK ──")
+
+    return len(issues)
+
+
+# ─── boundary ────────────────────────────────────────────────────────────
+def cmd_boundary(args):
+    """
+    Show API surface between layers. ~30 tokens output.
+    This is the key tool for cross-layer work.
+
+    Layers:
+        wasm     — JS↔Rust boundary (#[wasm_bindgen] pub fns)
+        engine   — Engine public API (pub fn in pub modules)
+        renderer — Renderer public API
+        crdt     — CRDT public API
+        server   — Server endpoints (when it exists)
+
+    Usage:
+        ./ide boundary wasm      — all wasm_bindgen pub functions
+        ./ide boundary engine    — engine's public API
+        ./ide boundary all       — all boundaries (~100 tokens)
+    """
+    if not args:
+        print("Usage: ./ide boundary <wasm|engine|renderer|crdt|server|all>")
+        sys.exit(1)
+
+    layer = args[0]
+
+    if layer == "all":
+        for l in ["wasm", "engine", "renderer", "crdt"]:
+            _show_boundary(l)
+            print()
+    else:
+        _show_boundary(layer)
+
+
+def _show_boundary(layer: str):
+    """Extract public API surface for a layer."""
+    crate_map = {
+        "wasm": IDE_ROOT / "crates" / "wasm" / "src",
+        "engine": IDE_ROOT / "crates" / "engine" / "src",
+        "renderer": IDE_ROOT / "crates" / "renderer" / "src",
+        "crdt": IDE_ROOT / "crates" / "crdt" / "src",
+    }
+
+    src_dir = crate_map.get(layer)
+    if not src_dir or not src_dir.exists():
+        print(f"Layer '{layer}' not found")
+        return
+
+    print(f"── {layer} boundary ──")
+
+    if layer == "wasm":
+        # Special: only show #[wasm_bindgen] pub functions with full signatures
+        for rs_file in sorted(src_dir.rglob("*.rs")):
+            lines = rs_file.read_text().splitlines()
+            in_wasm_impl = False
+            collecting_sig = False
+            sig_parts = []
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if '#[wasm_bindgen]' in stripped:
+                    in_wasm_impl = True
+                if collecting_sig:
+                    sig_parts.append(stripped.split('{')[0].strip())
+                    if '{' in stripped or stripped.endswith(')') or '->' in stripped:
+                        full_sig = ' '.join(sig_parts)
+                        if '{' in full_sig:
+                            full_sig = full_sig.split('{')[0].strip()
+                        print(f"  {full_sig}")
+                        collecting_sig = False
+                        sig_parts = []
+                    continue
+                if in_wasm_impl and stripped.startswith("pub fn "):
+                    if '{' in stripped:
+                        sig = stripped.split('{')[0].strip()
+                        print(f"  {sig}")
+                    else:
+                        collecting_sig = True
+                        sig_parts = [stripped]
+                if in_wasm_impl and stripped == '}' and not line.startswith(' '):
+                    in_wasm_impl = False
+    else:
+        # Show all pub fn signatures across the crate
+        for rs_file in sorted(src_dir.rglob("*.rs")):
+            rel = rs_file.relative_to(src_dir)
+            fns = []
+            lines = rs_file.read_text().splitlines()
+            for line in lines:
+                stripped = line.strip()
+                if stripped.startswith("pub fn ") or stripped.startswith("pub async fn "):
+                    sig = stripped.split('{')[0].strip()
+                    fns.append(sig)
+            if fns:
+                print(f"  {rel}:")
+                for f in fns:
+                    print(f"    {f}")
+
+
+# ─── slice ───────────────────────────────────────────────────────────────
+SLICES_DIR = IDE_ROOT / ".slices"
+SLICES_DIR.mkdir(exist_ok=True)
+
+def cmd_slice(args):
+    """
+    Track vertical slices — features that cut through all layers.
+
+    Usage:
+        ./ide slice start <name> <description>
+        ./ide slice touch <name> <layer>  — mark a layer as touched
+        ./ide slice done <name>
+        ./ide slice show <name>
+        ./ide slice list
+    """
+    if not args:
+        print("Usage: ./ide slice <start|touch|done|show|list> ...")
+        sys.exit(1)
+    sub = args[0]
+
+    if sub == "start":
+        name = args[1]
+        desc = args[2] if len(args) > 2 else ""
+        data = {
+            "name": name, "description": desc, "status": "active",
+            "layers": {}, "created": datetime.now().isoformat(),
+        }
+        save_json(SLICES_DIR / f"{name}.json", data)
+        print(f"Slice started: {name}")
+
+    elif sub == "touch":
+        name = args[1]
+        layer = args[2]
+        note = args[3] if len(args) > 3 else ""
+        path = SLICES_DIR / f"{name}.json"
+        s = load_json(path)
+        s["layers"][layer] = {"touched": datetime.now().isoformat(), "note": note}
+        save_json(path, s)
+        print(f"  {name}: touched {layer}")
+
+    elif sub == "done":
+        name = args[1]
+        path = SLICES_DIR / f"{name}.json"
+        s = load_json(path)
+        s["status"] = "done"
+        save_json(path, s)
+        print(f"Slice done: {name}")
+
+    elif sub == "show":
+        name = args[1]
+        path = SLICES_DIR / f"{name}.json"
+        s = load_json(path)
+        print(f"SLICE: {s['name']} [{s['status']}]")
+        if s.get("description"):
+            print(f"  {s['description']}")
+        all_layers = ["engine", "renderer", "crdt", "wasm", "frontend", "server"]
+        for l in all_layers:
+            if l in s["layers"]:
+                note = s["layers"][l].get("note", "")
+                print(f"  [x] {l}{': ' + note if note else ''}")
+            else:
+                print(f"  [ ] {l}")
+
+    elif sub == "list":
+        for f in sorted(SLICES_DIR.glob("*.json")):
+            s = load_json(f)
+            touched = len(s.get("layers", {}))
+            print(f"  [{s['status']:6}] {s['name']} ({touched} layers)")
+
+
+# ─── focus ────────────────────────────────────────────────────────────────
+def cmd_focus(args):
+    """
+    Scope lock — constrain work to ONE crate/directory.
+
+    Usage:
+        ./ide focus <crate>     — Lock focus (e.g., "engine", "renderer")
+        ./ide focus              — Show current focus
+        ./ide focus clear        — Remove focus lock
+
+    When focused:
+    - orient shows only that crate's files
+    - pain-check hook warns if touching files outside focus
+    - Forces single-crate discipline
+    """
+    focus_file = IDE_ROOT / ".focus"
+
+    if not args:
+        if focus_file.exists():
+            focus = focus_file.read_text().strip()
+            print(f"FOCUS: {focus}")
+            # Show files in focused crate
+            crate_dir = IDE_ROOT / "crates" / focus / "src"
+            if crate_dir.exists():
+                rs_files = sorted(crate_dir.glob("**/*.rs"))
+                print(f"  {len(rs_files)} files:")
+                for f in rs_files[:10]:
+                    print(f"    {f.relative_to(IDE_ROOT)}")
+                if len(rs_files) > 10:
+                    print(f"    ... +{len(rs_files) - 10} more")
+        else:
+            print("FOCUS: (none — you can touch anything, which means you WILL sprawl)")
+        return
+
+    sub = args[0]
+    if sub == "clear":
+        if focus_file.exists():
+            focus_file.unlink()
+        print("FOCUS: cleared")
+        return
+
+    # Set focus
+    crate_name = sub
+    crate_dir = IDE_ROOT / "crates" / crate_name
+    if not crate_dir.exists():
+        # Check if it's a non-crate dir like "app" or "ide"
+        if crate_name in ["app", "ide", "hooks"]:
+            focus_file.write_text(crate_name)
+            print(f"FOCUS: {crate_name}")
+            return
+        print(f"FOCUS: crate '{crate_name}' not found")
+        print(f"  Available: {', '.join(d.name for d in (IDE_ROOT / 'crates').iterdir() if d.is_dir())}")
+        return
+
+    focus_file.write_text(crate_name)
+    print(f"FOCUS: {crate_name}")
+    # Show what's in scope
+    rs_files = sorted((crate_dir / "src").glob("**/*.rs"))
+    print(f"  {len(rs_files)} files in scope")
+
+
+# ─── journal ─────────────────────────────────────────────────────────────
+def cmd_journal(args):
+    """
+    Implementation journal — captures algorithmic state for context recovery.
+
+    Usage:
+        ./ide journal write <task_id> <content>  — Save/overwrite journal
+        ./ide journal append <task_id> <content>  — Append to journal
+        ./ide journal show <task_id>             — Read journal
+        ./ide journal clear <task_id>            — Delete journal
+
+    Journals are shown by `orient` when a task is active.
+    After compaction, the journal tells you WHERE you were in the algorithm,
+    not just WHAT task you were on.
+
+    Content should capture:
+    - Algorithm name and variant chosen
+    - Current step (e.g., "implementing step 3 of 5: edge splitting")
+    - Key invariants that must hold
+    - What you tried that didn't work
+    - What file(s) you're editing
+    """
+    if len(args) < 1:
+        print("Usage: ./ide journal write|append|show|clear [task_id] [content]")
+        return
+
+    sub = args[0]
+    # Default to "session" journal when no task_id given
+    if len(args) < 2 or sub in ("write", "append") and len(args) >= 2 and not args[1].startswith("t"):
+        task_id = "session"
+        content_args = args[1:]
+    else:
+        task_id = args[1]
+        content_args = args[2:]
+    journal_path = JOURNALS_DIR / f"{task_id}.md"
+
+    if sub == "write":
+        content = " ".join(content_args) if content_args else ""
+        journal_path.write_text(content + "\n")
+        print(f"JOURNAL: {task_id} written ({len(content)} chars)")
+
+    elif sub == "append":
+        content = " ".join(content_args) if content_args else ""
+        with open(journal_path, "a") as f:
+            f.write(content + "\n")
+        print(f"JOURNAL: {task_id} appended")
+
+    elif sub == "show":
+        if journal_path.exists():
+            print(journal_path.read_text().strip())
+        else:
+            print(f"JOURNAL: {task_id} (empty)")
+
+    elif sub == "clear":
+        if journal_path.exists():
+            journal_path.unlink()
+            print(f"JOURNAL: {task_id} cleared")
+        else:
+            print(f"JOURNAL: {task_id} (already empty)")
+
+    else:
+        print(f"Unknown journal sub: {sub}")
+
+
+# ─── api ─────────────────────────────────────────────────────────────────
+def cmd_api(args):
+    """
+    Show complete public API surface of a crate: structs, enums, traits,
+    functions, AND methods inside impl blocks.
+
+    This is the tool that prevents signature-guessing pain.
+    Before calling any function from another crate, run this first.
+
+    Usage:
+        ./ide api <crate>           — full API surface
+        ./ide api <crate> <type>    — filter to specific type's methods
+        ./ide api <crate> fns       — only standalone pub fns
+        ./ide api <crate> types     — only pub struct/enum/trait
+    """
+    if not args:
+        print("Usage: ./ide api <crate> [type|fns|types]")
+        sys.exit(1)
+
+    crate_name = args[0]
+    filter_arg = args[1] if len(args) > 1 else None
+    src_dir = IDE_ROOT / "crates" / crate_name / "src"
+
+    if not src_dir.exists():
+        print(f"Crate '{crate_name}' not found")
+        available = [d.name for d in (IDE_ROOT / "crates").iterdir() if d.is_dir()]
+        print(f"  Available: {', '.join(available)}")
+        sys.exit(1)
+
+    print(f"── {crate_name} API ──")
+
+    for rs_file in sorted(src_dir.rglob("*.rs")):
+        rel = rs_file.relative_to(src_dir)
+        items = _extract_api(rs_file, filter_arg)
+        if items:
+            print(f"  {rel}:")
+            for item in items:
+                print(f"    {item}")
+
+
+def _extract_api(path: Path, filter_arg: str | None) -> list[str]:
+    """Extract public API items from a Rust source file."""
+    try:
+        lines = path.read_text().splitlines()
+    except Exception:
+        return []
+
+    items = []
+    current_impl = None  # Track what impl block we're in
+    brace_depth = 0
+    impl_brace_depth = 0
+    in_impl = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Track impl blocks
+        impl_match = re.match(
+            r'impl(?:<[^>]*>)?\s+(?:(\w+(?:<[^>]*>)?)\s+for\s+)?(\w+(?:<[^>]*>)?)',
+            stripped
+        )
+        if impl_match and '{' in stripped:
+            current_impl = impl_match.group(2)
+            if impl_match.group(1):
+                current_impl = f"{impl_match.group(2)} (impl {impl_match.group(1)})"
+            in_impl = True
+            impl_brace_depth = brace_depth
+
+        # Track braces
+        brace_depth += stripped.count('{') - stripped.count('}')
+        if in_impl and brace_depth <= impl_brace_depth:
+            in_impl = False
+            current_impl = None
+
+        # Skip non-pub items
+        if not stripped.startswith("pub ") and not stripped.startswith("pub(crate)"):
+            continue
+
+        # Filter modes
+        if filter_arg == "fns" and not any(kw in stripped for kw in ["pub fn ", "pub async fn "]):
+            continue
+        if filter_arg == "types" and not any(kw in stripped for kw in ["pub struct ", "pub enum ", "pub trait ", "pub type "]):
+            continue
+
+        # Extract signature
+        sig = stripped.split('{')[0].strip()
+        if sig.endswith(','):
+            sig = sig[:-1]
+
+        # Type definitions
+        for kw in ["pub struct ", "pub enum ", "pub trait ", "pub type "]:
+            if stripped.startswith(kw):
+                items.append(sig)
+                break
+        else:
+            # Function/method signatures
+            for kw in ["pub fn ", "pub async fn ", "pub const fn ", "pub unsafe fn "]:
+                if kw in stripped:
+                    if current_impl and filter_arg and filter_arg not in ("fns", "types"):
+                        # Filtering by type name — only show if impl matches
+                        if filter_arg.lower() not in current_impl.lower():
+                            break
+                    prefix = f"  [{current_impl}] " if current_impl else ""
+                    items.append(f"{prefix}{sig}")
+                    break
+
+    return items
+
+
+# ─── impact ──────────────────────────────────────────────────────────────
+def cmd_impact(args):
+    """
+    Show which test files import/use a given module.
+    Answers: "I changed X, what tests might break?"
+
+    Usage:
+        ./ide impact <file-or-module>    — find tests that import this
+        ./ide impact rasterize           — which tests use rasterize?
+        ./ide impact scene               — which tests use scene?
+    """
+    if not args:
+        print("Usage: ./ide impact <file-or-module-name>")
+        sys.exit(1)
+
+    target = args[0]
+    # Normalize: strip path prefix, extension
+    target_name = Path(target).stem  # "rasterize.rs" → "rasterize"
+
+    # Search test files for imports of this module
+    test_dirs = [
+        IDE_ROOT / "crates" / "renderer" / "tests",
+        IDE_ROOT / "crates" / "engine" / "tests",
+        IDE_ROOT / "crates" / "crdt" / "tests",
+    ]
+
+    # Also search src/bin for binaries that use this
+    bin_dirs = [
+        IDE_ROOT / "crates" / "renderer" / "src" / "bin",
+    ]
+
+    hits = []
+    for d in test_dirs + bin_dirs:
+        if not d.exists():
+            continue
+        for f in sorted(d.glob("*.rs")):
+            text = f.read_text()
+            # Check for direct module references or use statements
+            if target_name in text:
+                rel = f.relative_to(IDE_ROOT)
+                # Count how many times it's referenced
+                count = text.count(target_name)
+                hits.append((str(rel), count))
+
+    # Also check which internal modules import this
+    src_hits = []
+    for crate_dir in (IDE_ROOT / "crates").iterdir():
+        src = crate_dir / "src"
+        if not src.exists():
+            continue
+        for f in sorted(src.rglob("*.rs")):
+            if f.stem == target_name:
+                continue  # Skip self
+            text = f.read_text()
+            if f"use crate::{target_name}" in text or f"mod {target_name}" in text or f"{target_name}::" in text:
+                rel = f.relative_to(IDE_ROOT)
+                src_hits.append(str(rel))
+
+    if hits:
+        print(f"IMPACT: {target_name} is used by {len(hits)} test/bin files:")
+        for path, count in hits:
+            print(f"  {path} ({count} refs)")
+    else:
+        print(f"IMPACT: no test files reference '{target_name}'")
+
+    if src_hits:
+        print(f"MODULES: {len(src_hits)} source files depend on {target_name}:")
+        for path in src_hits:
+            print(f"  {path}")
+
+
+# ─── snapshot ────────────────────────────────────────────────────────────
+SNAPSHOTS_DIR = IDE_ROOT / ".snapshots"
+SNAPSHOTS_DIR.mkdir(exist_ok=True)
+
+def cmd_snapshot(args):
+    """
+    Render snapshot management — baseline + diff for pixel-level regression detection.
+
+    Usage:
+        ./ide snapshot           — run all render tests, show status vs baseline
+        ./ide snapshot save      — capture current render hashes as baseline
+        ./ide snapshot diff      — compare current vs baseline, show which changed
+        ./ide snapshot dump      — export raw RGBA files to .snapshots/ for deep inspection
+        ./ide snapshot pixeldiff <test> — byte-level diff of one test vs baseline
+    """
+    sub = args[0] if args else "status"
+    baseline_path = SNAPSHOTS_DIR / "baseline.json"
+
+    if sub == "save":
+        # Capture current state as baseline
+        current = _run_snapshot_export()
+        if current is None:
+            return
+        save_json(baseline_path, current)
+        print(f"SNAPSHOT: baseline saved ({len(current['tests'])} tests)")
+        for name, info in current["tests"].items():
+            print(f"  {name}: hash={info['hash']} pixels={info['coverage']}")
+
+    elif sub == "diff":
+        if not baseline_path.exists():
+            print("SNAPSHOT: no baseline. Run './ide snapshot save' first.")
+            return
+        baseline = load_json(baseline_path)
+        current = _run_snapshot_export()
+        if current is None:
+            return
+        _show_diff(baseline, current)
+
+    elif sub == "dump":
+        # Export raw pixel data
+        result = subprocess.run(
+            ["cargo", "run", "--bin", "snapshot_export", "--", "--dump"],
+            capture_output=True, text=True, cwd=IDE_ROOT, timeout=120
+        )
+        if result.returncode != 0:
+            print(f"SNAPSHOT: FAIL — {result.stderr.strip()[:150]}")
+            return
+        raw_files = list(SNAPSHOTS_DIR.glob("*.raw"))
+        print(f"SNAPSHOT: dumped {len(raw_files)} raw files to .snapshots/")
+        for f in sorted(raw_files):
+            size = f.stat().st_size
+            print(f"  {f.name}: {size} bytes ({int(size/4)} pixels)")
+
+    elif sub == "pixeldiff":
+        if len(args) < 2:
+            print("Usage: ./ide snapshot pixeldiff <test-name>")
+            return
+        test_name = args[1]
+        _pixel_diff(test_name, baseline_path)
+
+    else:  # status
+        current = _run_snapshot_export()
+        if current is None:
+            return
+        if baseline_path.exists():
+            baseline = load_json(baseline_path)
+            _show_diff(baseline, current)
+        else:
+            print(f"SNAPSHOT: {len(current['tests'])} tests (no baseline)")
+            for name, info in current["tests"].items():
+                print(f"  {name}: hash={info['hash']} pixels={info['coverage']}")
+
+
+def _run_snapshot_export() -> dict | None:
+    """Run snapshot_export binary and parse output."""
+    result = subprocess.run(
+        ["cargo", "run", "--bin", "snapshot_export"],
+        capture_output=True, text=True, cwd=IDE_ROOT, timeout=120
+    )
+    if result.returncode != 0:
+        # Check if it's just a build issue
+        _print_first_error(result.stderr)
+        return None
+
+    tests = {}
+    summary = None
+    for line in result.stdout.strip().split("\n"):
+        if line.startswith("TEST:"):
+            parts = line.split(":")
+            # TEST:name:width:height:hash:coverage
+            if len(parts) >= 6:
+                tests[parts[1]] = {
+                    "width": int(parts[2]),
+                    "height": int(parts[3]),
+                    "hash": parts[4],
+                    "coverage": parts[5],
+                }
+        elif line.startswith("SUMMARY:"):
+            summary = line[8:]
+
+    return {"tests": tests, "summary": summary}
+
+
+def _show_diff(baseline: dict, current: dict):
+    """Compare baseline and current snapshots."""
+    bl_tests = baseline.get("tests", {})
+    cu_tests = current.get("tests", {})
+
+    changed = []
+    added = []
+    removed = []
+    same = []
+
+    for name in sorted(set(list(bl_tests.keys()) + list(cu_tests.keys()))):
+        if name in bl_tests and name in cu_tests:
+            if bl_tests[name]["hash"] == cu_tests[name]["hash"]:
+                same.append(name)
+            else:
+                changed.append(name)
+        elif name in cu_tests:
+            added.append(name)
+        else:
+            removed.append(name)
+
+    total = len(same) + len(changed) + len(added) + len(removed)
+    if not changed and not added and not removed:
+        print(f"SNAPSHOT: OK — {len(same)} tests unchanged")
+    else:
+        print(f"SNAPSHOT: {len(changed)} changed, {len(added)} added, {len(removed)} removed, {len(same)} same")
+        for name in changed:
+            old_cov = bl_tests[name]["coverage"]
+            new_cov = cu_tests[name]["coverage"]
+            cov_note = f" (coverage: {old_cov} → {new_cov})" if old_cov != new_cov else ""
+            print(f"  CHANGED: {name}{cov_note}")
+        for name in added:
+            print(f"  NEW: {name}")
+        for name in removed:
+            print(f"  GONE: {name}")
+
+
+def _pixel_diff(test_name: str, baseline_path: Path):
+    """Deep pixel diff of one test: dump both baseline and current, compare byte-by-byte."""
+    if not baseline_path.exists():
+        print("No baseline. Run './ide snapshot save' first.")
+        return
+
+    # Dump current
+    result = subprocess.run(
+        ["cargo", "run", "--bin", "snapshot_export", "--", "--dump"],
+        capture_output=True, text=True, cwd=IDE_ROOT, timeout=120
+    )
+    if result.returncode != 0:
+        print(f"FAIL: {result.stderr.strip()[:150]}")
+        return
+
+    current_raw = SNAPSHOTS_DIR / f"{test_name}.raw"
+    baseline_raw = SNAPSHOTS_DIR / f"{test_name}.baseline.raw"
+
+    if not current_raw.exists():
+        print(f"No raw data for test '{test_name}'")
+        return
+
+    if not baseline_raw.exists():
+        # Save current as baseline for next time
+        import shutil
+        shutil.copy2(current_raw, baseline_raw)
+        print(f"PIXELDIFF: saved {test_name} baseline ({current_raw.stat().st_size} bytes)")
+        print("  Run again after changes to see diff.")
+        return
+
+    # Compare byte-by-byte
+    cur_data = current_raw.read_bytes()
+    base_data = baseline_raw.read_bytes()
+
+    if len(cur_data) != len(base_data):
+        print(f"PIXELDIFF: size mismatch ({len(base_data)} → {len(cur_data)})")
+        return
+
+    pixel_count = len(cur_data) // 4
+    diff_pixels = 0
+    max_diff = 0
+    diff_regions = []
+
+    for i in range(pixel_count):
+        off = i * 4
+        br, bg, bb, ba = base_data[off:off+4]
+        cr, cg, cb, ca = cur_data[off:off+4]
+        d = abs(cr-br) + abs(cg-bg) + abs(cb-bb) + abs(ca-ba)
+        if d > 0:
+            diff_pixels += 1
+            if d > max_diff:
+                max_diff = d
+
+    if diff_pixels == 0:
+        print(f"PIXELDIFF: {test_name} — identical ({pixel_count} pixels)")
+    else:
+        pct = diff_pixels * 100.0 / pixel_count
+        print(f"PIXELDIFF: {test_name} — {diff_pixels}/{pixel_count} pixels differ ({pct:.1f}%)")
+        print(f"  max channel diff: {max_diff}")
+
+
+# ─── quick ───────────────────────────────────────────────────────────────
+def cmd_quick(args):
+    """
+    Fastest full verification: cargo check + snapshot diff.
+    ~20 tokens output. Use this after every edit.
+
+    Usage:
+        ./ide quick     — compile check + render snapshot diff
+    """
+    # 1. Cargo check
+    result = subprocess.run(
+        ["cargo", "check", "--message-format=short"],
+        capture_output=True, text=True, cwd=IDE_ROOT, timeout=120
+    )
+    if result.returncode != 0:
+        _print_first_error(result.stderr)
+        return
+    print("CHECK: OK", end="")
+
+    # 2. Snapshot diff (if baseline exists)
+    baseline_path = SNAPSHOTS_DIR / "baseline.json"
+    if baseline_path.exists():
+        current = _run_snapshot_export()
+        if current:
+            bl = load_json(baseline_path)
+            bl_tests = bl.get("tests", {})
+            cu_tests = current.get("tests", {})
+            changed = [n for n in cu_tests if n in bl_tests and bl_tests[n]["hash"] != cu_tests[n]["hash"]]
+            if changed:
+                print(f" | SNAPSHOT: {len(changed)} changed: {', '.join(changed)}")
+            else:
+                print(f" | SNAPSHOT: OK")
+        else:
+            print(" | SNAPSHOT: BUILD FAIL")
+    else:
+        print(" | SNAPSHOT: no baseline")
+
+
+def cmd_profile(args):
+    """
+    Render performance profiler. Runs bench_render at various object counts.
+    Release mode for accurate timings.
+
+    Usage:
+        ./ide profile          — run benchmark suite
+        ./ide profile --debug  — run in debug mode (faster compile, slower render)
+    """
+    mode = "release"
+    build_flag = ["--release"]
+    if args and args[0] == "--debug":
+        mode = "debug"
+        build_flag = []
+
+    result = subprocess.run(
+        ["cargo", "run"] + build_flag + ["--bin", "bench"],
+        capture_output=True, text=True, cwd=IDE_ROOT, timeout=300
+    )
+    if result.returncode != 0:
+        errors = [l for l in result.stderr.splitlines() if "error" in l.lower()]
+        for e in errors[:5]:
+            print(e)
+        return
+
+    lines = [l for l in result.stdout.splitlines() if l.startswith("BENCH:")]
+    if not lines:
+        print("PROFILE: no output")
+        return
+
+    print(f"PROFILE ({mode}):")
+    print(f"  {'Objects':>8}  {'Time':>10}  {'Items':>8}  {'Per-obj':>10}")
+    print(f"  {'─'*8}  {'─'*10}  {'─'*8}  {'─'*10}")
+    for line in lines[1:]:  # skip header
+        parts = line.replace("BENCH:", "").split(",")
+        if len(parts) == 3:
+            objects, time_us, items = int(parts[0]), int(parts[1]), int(parts[2])
+            time_ms = time_us / 1000.0
+            per_obj = time_us / max(objects, 1)
+            fps = 1000.0 / time_ms if time_ms > 0 else 9999
+            print(f"  {objects:>8}  {time_ms:>8.1f}ms  {items:>8}  {per_obj:>8.1f}us  ~{fps:.0f}fps")
+
+
+def cmd_visual(args):
+    """
+    Headless visual regression check. Builds WASM, starts dev server,
+    verifies shapes render and fps meets target. ~10 tokens output.
+
+    Usage:
+        ./ide check visual   — build + visual verify
+        ./ide visual         — visual verify only (assumes WASM built)
+    """
+    # Run the Node.js visual check script
+    result = subprocess.run(
+        ["node", "visual-check.mjs"],
+        capture_output=True, text=True,
+        cwd=os.path.join(IDE_ROOT, "app"),
+        timeout=60
+    )
+    lines = [l for l in result.stdout.splitlines() if l.startswith("VISUAL:")]
+    fails = [l for l in lines if "FAIL" in l]
+    warns = [l for l in lines if "WARN" in l]
+
+    if result.returncode != 0 or fails:
+        for f in fails:
+            print(f)
+        if not fails:
+            # Print last few lines for debugging
+            for l in lines[-5:]:
+                print(l)
+        return
+
+    # Extract key metrics
+    for l in lines:
+        if "initial" in l or "pan_fps" in l or "ALL" in l:
+            print(l.replace("VISUAL:", "VISUAL: "))
+    for w in warns:
+        print(w.replace("VISUAL:", "VISUAL: "))
+
+
+def cmd_fps(args):
+    """
+    Measure actual FPS in headless browser with 80K objects.
+    Boots vite, pans, reports median/p95 fps. ~10 tokens output.
+    EXIT 0 = 60fps achieved.
+
+    Usage:
+        ./ide fps        — measure fps (assumes WASM built)
+        ./ide check fps  — build WASM + measure fps
+    """
+    result = subprocess.run(
+        ["node", "fps-check.mjs"],
+        capture_output=True, text=True,
+        cwd=os.path.join(IDE_ROOT, "app"),
+        timeout=90
+    )
+    lines = [l for l in result.stdout.splitlines() if l.startswith("FPS:")]
+    fails = [l for l in lines if "FAIL" in l]
+    warns = [l for l in lines if "WARN" in l]
+    passes = [l for l in lines if "PASS" in l]
+
+    if result.returncode != 0 or fails:
+        for f in fails:
+            print(f)
+        if not fails:
+            for l in lines[-5:]:
+                print(l)
+        return
+
+    # Print key metrics only
+    for l in lines:
+        if any(k in l for k in ["median_fps", "p95_fps", "PASS", "initial"]):
+            print(l.replace("FPS:", "FPS: "))
+    for w in warns:
+        print(w.replace("FPS:", "FPS: "))
+
+
+def cmd_gap(args):
+    """
+    Feature gap analysis — what's missing vs real Figma.
+    Scans wasm/src/lib.rs for exposed methods, compares to Figma feature list.
+    Output: HAVE / MISSING for each category. ~30 tokens.
+    """
+    lib_rs = os.path.join(IDE_ROOT, "crates", "wasm", "src", "lib.rs")
+    canvas2d_rs = os.path.join(IDE_ROOT, "crates", "wasm", "src", "canvas2d.rs")
+    main_ts = os.path.join(IDE_ROOT, "app", "src", "main.ts")
+
+    content = ""
+    for f in [lib_rs, canvas2d_rs, main_ts]:
+        if os.path.exists(f):
+            content += open(f).read()
+
+    # Define Figma feature categories and detection patterns
+    features = {
+        # Core tools
+        "Rectangle tool": "add_rectangle",
+        "Ellipse tool": "add_ellipse",
+        "Frame tool": "add_frame",
+        "Text tool": "add_text",
+        "Pen tool": "pen_start",
+        "Line tool": "add_line",
+        # Selection
+        "Single select": "mouse_down",
+        "Multi-select": "toggle_select",
+        "Drag move": "Dragging",
+        "Resize handles": "Resizing",
+        # Edit
+        "Undo/redo": "undo",
+        "Copy/paste": "copy_selected",
+        "Duplicate": "duplicate_selected",
+        "Delete": "delete_selected",
+        "Boolean ops": "boolean_op",
+        # Rendering
+        "Fill (solid)": "Solid",
+        "Fill (gradient)": "LinearGradient",
+        "Stroke": "stroke",
+        "Drop shadow": "DropShadow",
+        "Rounded corners": "corner_radii",
+        "Frame clipping": "clips",
+        "Text rendering": "fill_text",
+        "Vector rendering": "render_items_with_camera",
+        # Export
+        "PNG export": "export_pixels",
+        "SVG export": "export_svg",
+        # Navigation
+        "Pan/zoom": "pan_start",
+        "Multi-page": "switch_page",
+        "Layers panel": "get_layers",
+        "Properties panel": "get_node_info",
+        # Missing features to detect
+        "Group/ungroup": "group_selected",
+        "Align tools": "align_",
+        "Distribute": "distribute_",
+        "Snap to grid": "snap",
+        "Rulers/guides": "ruler",
+        "Color picker UI": "color_picker",
+        "Zoom to fit": "zoom_to_fit",
+        "Component system": "create_component",
+        "Auto-layout": "auto_layout",
+        "Constraints": "constraint",
+        "Blend modes": "blend_mode",
+        "Inner shadow": "InnerShadow",
+        "Blur effect": "LayerBlur",
+        "Image fill": "image_fill",
+        "Mask": "mask_",
+        "Flatten": "flatten",
+        "Vector network": "vector_network",
+        "Prototype/interactions": "prototype",
+        "Comments": "comment",
+        "Version history": "version",
+        "Real-time collab": "websocket",
+    }
+
+    have = []
+    missing = []
+    for name, pattern in features.items():
+        if pattern.lower() in content.lower():
+            have.append(name)
+        else:
+            missing.append(name)
+
+    print(f"HAVE ({len(have)}):")
+    for h in have:
+        print(f"  + {h}")
+    print(f"\nMISSING ({len(missing)}):")
+    for m in missing:
+        print(f"  - {m}")
+    print(f"\nCoverage: {len(have)}/{len(have)+len(missing)} ({100*len(have)//(len(have)+len(missing))}%)")
+
+
+def cmd_workflow(args):
+    """
+    Automated workflow test — exercises real Figma operations headlessly.
+    Tests create, select, drag, undo, export, page switch, fps.
+    Output: pass/fail per test + summary. ~15 tokens.
+
+    Usage:
+        ./ide workflow       — run workflow tests (assumes WASM built)
+        ./ide check workflow — build WASM + run workflow tests
+    """
+    result = subprocess.run(
+        ["node", "workflow-check.mjs"],
+        capture_output=True, text=True,
+        cwd=os.path.join(IDE_ROOT, "app"),
+        timeout=120
+    )
+    lines = [l for l in result.stdout.splitlines() if l.startswith("WORKFLOW:")]
+    fails = [l for l in lines if "FAIL" in l]
+    summary = [l for l in lines if "SUMMARY" in l]
+
+    if result.returncode != 0 or fails:
+        for f in fails:
+            print(f)
+        for s in summary:
+            print(s)
+        if not fails and not summary:
+            for l in lines[-5:]:
+                print(l)
+        return
+
+    for s in summary:
+        print(s.replace("WORKFLOW:", "WORKFLOW: "))
+
+
+# ─── progress ─────────────────────────────────────────────────────────────
+def cmd_progress(args):
+    """
+    One-shot project dashboard. ~20 tokens output.
+    Shows: build, test count, apple_website phase, gap %, WASM size, lib.rs lines.
+    """
+    out = []
+
+    # 1. Build check (fast — just cargo check)
+    r = subprocess.run(
+        ["cargo", "check", "--workspace", "-q"],
+        capture_output=True, text=True, cwd=str(IDE_ROOT), timeout=120
+    )
+    out.append(f"BUILD: {'OK' if r.returncode == 0 else 'FAIL'}")
+
+    # 2. Test count
+    r = subprocess.run(
+        ["cargo", "test", "--workspace", "--", "--list"],
+        capture_output=True, text=True, cwd=str(IDE_ROOT), timeout=120
+    )
+    test_names = [l for l in r.stdout.splitlines() if ": test" in l]
+    out.append(f"TESTS: {len(test_names)}")
+
+    # 3. Apple website phases
+    spec_file = IDE_ROOT / "crates" / "renderer" / "tests" / "apple_website.rs"
+    if spec_file.exists():
+        spec = spec_file.read_text()
+        phases = re.findall(r"fn (p\d+)_", spec)
+        max_phase = max(int(p[1:]) for p in phases) if phases else 0
+        commented = len(re.findall(r"//\s*#\[test\]\s*\n\s*//\s*fn p\d+", spec))
+        out.append(f"SPEC: Phase {max_phase} ({len(phases)} tests, {commented} blocked)")
+
+    # 4. Feature gap
+    lib_rs = IDE_ROOT / "crates" / "wasm" / "src" / "lib.rs"
+    canvas2d_rs = IDE_ROOT / "crates" / "wasm" / "src" / "canvas2d.rs"
+    main_ts = IDE_ROOT / "app" / "src" / "main.ts"
+    content = ""
+    for f in [lib_rs, canvas2d_rs, main_ts]:
+        if f.exists():
+            content += f.read_text()
+    features = {
+        "Rectangle": "add_rectangle", "Ellipse": "add_ellipse", "Frame": "add_frame",
+        "Text": "add_text", "Pen": "pen_start", "Line": "add_line",
+        "Select": "mouse_down", "Multi-select": "toggle_select",
+        "Drag": "Dragging", "Resize": "Resizing",
+        "Undo/redo": "undo", "Copy/paste": "copy_selected",
+        "Duplicate": "duplicate_selected", "Delete": "delete_selected",
+        "Boolean ops": "boolean_op", "Solid fill": "Solid",
+        "Gradient": "LinearGradient", "Stroke": "stroke",
+        "Shadow": "DropShadow", "Corners": "corner_radii",
+        "Clipping": "clips", "Text render": "fill_text",
+        "Vector render": "render_items_with_camera",
+        "PNG": "export_png", "SVG": "export_svg",
+        "Pan/zoom": "pan_start", "Pages": "switch_page",
+        "Layers": "get_layers", "Properties": "get_node_info",
+        "Group": "group_selected", "Align": "align_",
+        "Distribute": "distribute_", "Snap": "snap",
+        "Rulers": "ruler", "Color picker": "color_picker",
+        "Zoom fit": "zoom_to_fit", "Components": "create_component",
+        "Auto-layout": "auto_layout", "Constraints": "constraint",
+        "Blend modes": "blend_mode", "Inner shadow": "InnerShadow",
+        "Blur": "LayerBlur", "Image fill": "image_fill",
+        "Mask": "mask_", "Flatten": "flatten",
+        "Vector net": "vector_network", "Prototype": "prototype",
+        "Comments": "comment", "Versions": "version",
+        "Collab": "websocket",
+    }
+    have = sum(1 for p in features.values() if p.lower() in content.lower())
+    total = len(features)
+    out.append(f"GAP: {have}/{total} ({100*have//total}%)")
+
+    # 5. WASM size
+    wasm_pkg = IDE_ROOT / "crates" / "wasm" / "pkg"
+    if wasm_pkg.exists():
+        wasm_files = list(wasm_pkg.glob("*.wasm"))
+        if wasm_files:
+            size_kb = wasm_files[0].stat().st_size // 1024
+            out.append(f"WASM: {size_kb}KB")
+
+    # 6. lib.rs size
+    if lib_rs.exists():
+        lines = len(lib_rs.read_text().splitlines())
+        out.append(f"LIB.RS: {lines} lines")
+
+    for line in out:
+        print(line)
+
+
+def cmd_hot(args):
+    """
+    Find hotspot functions — longest pub fn blocks in lib.rs.
+    Helps decide when to refactor. ~15 tokens.
+    """
+    lib_rs = IDE_ROOT / "crates" / "wasm" / "src" / "lib.rs"
+    if not lib_rs.exists():
+        print("lib.rs not found")
+        return
+    lines = lib_rs.read_text().splitlines()
+    fns = []
+    cur_fn = None
+    cur_start = 0
+    depth = 0
+    for i, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if stripped.startswith("pub fn ") or stripped.startswith("fn "):
+            m = re.search(r"(?:pub )?fn (\w+)", stripped)
+            if m:
+                cur_fn = m.group(1)
+                cur_start = i
+                depth = 0
+        depth += stripped.count('{') - stripped.count('}')
+        if cur_fn and depth <= 0 and '{' in ''.join(lines[cur_start-1:i]):
+            length = i - cur_start + 1
+            fns.append((length, cur_fn, cur_start))
+            cur_fn = None
+    fns.sort(reverse=True)
+    print("HOTSPOTS (longest functions):")
+    for length, name, start in fns[:10]:
+        print(f"  {length:4d} lines  {name} (line {start})")
+
+
+def cmd_size(args):
+    """
+    Report codebase size: lines per crate, WASM binary size, TS size.
+    ~15 tokens output.
+    """
+    total_rs = 0
+    for crate_dir in sorted((IDE_ROOT / "crates").iterdir()):
+        if not crate_dir.is_dir():
+            continue
+        lines = 0
+        for rs in crate_dir.rglob("*.rs"):
+            lines += len(rs.read_text().splitlines())
+        if lines > 0:
+            print(f"  {crate_dir.name}: {lines} lines")
+            total_rs += lines
+    print(f"  TOTAL RUST: {total_rs} lines")
+
+    ts_lines = 0
+    for ts in (IDE_ROOT / "app" / "src").rglob("*.ts"):
+        ts_lines += len(ts.read_text().splitlines())
+    print(f"  TS: {ts_lines} lines")
+
+    wasm_pkg = IDE_ROOT / "crates" / "wasm" / "pkg"
+    if wasm_pkg.exists():
+        for wf in wasm_pkg.glob("*.wasm"):
+            kb = wf.stat().st_size // 1024
+            print(f"  WASM: {kb}KB ({wf.name})")
+
+
+def cmd_debt(args):
+    """
+    Technical debt scan: TODO/FIXME/HACK, unwrap(), unsafe, clone() counts.
+    ~20 tokens output. Helps prioritize cleanup.
+    """
+    markers = {"TODO": 0, "FIXME": 0, "HACK": 0, "unwrap()": 0, "unsafe": 0, "clone()": 0}
+    files_with_debt = {}
+
+    for ext, dirs in [("*.rs", [IDE_ROOT / "crates"]), ("*.ts", [IDE_ROOT / "app" / "src"])]:
+        for d in dirs:
+            for f in d.rglob(ext):
+                text = f.read_text()
+                for marker in markers:
+                    count = text.count(marker)
+                    if count > 0:
+                        markers[marker] += count
+                        rel = str(f.relative_to(IDE_ROOT))
+                        if rel not in files_with_debt:
+                            files_with_debt[rel] = {}
+                        files_with_debt[rel][marker] = count
+
+    print("DEBT SCAN:")
+    for marker, count in sorted(markers.items(), key=lambda x: -x[1]):
+        if count > 0:
+            print(f"  {marker:12s} {count:4d}")
+
+    if args and args[0] == "-v":
+        print("\nPER-FILE:")
+        for f, counts in sorted(files_with_debt.items(), key=lambda x: -sum(x[1].values())):
+            total = sum(counts.values())
+            detail = ", ".join(f"{k}:{v}" for k, v in counts.items() if v > 0)
+            print(f"  {total:3d}  {f}  ({detail})")
+
+
+def cmd_wired(args):
+    """
+    Show which WASM pub fn methods are called from TypeScript and which aren't.
+    Helps find unwired APIs. ~20 tokens.
+    """
+    lib_rs = IDE_ROOT / "crates" / "wasm" / "src" / "lib.rs"
+    main_ts = IDE_ROOT / "app" / "src" / "main.ts"
+    if not lib_rs.exists() or not main_ts.exists():
+        print("Missing lib.rs or main.ts")
+        return
+    # Extract pub fn names from lib.rs
+    wasm_fns = set()
+    for line in lib_rs.read_text().splitlines():
+        m = re.search(r"pub fn (\w+)", line.strip())
+        if m:
+            wasm_fns.add(m.group(1))
+    # Skip internal/lifecycle methods
+    skip = {"new", "render", "render_canvas2d", "tick"}
+    wasm_fns -= skip
+    # Check which are referenced in main.ts
+    ts_text = main_ts.read_text()
+    wired = set()
+    unwired = set()
+    for fn in sorted(wasm_fns):
+        if fn in ts_text:
+            wired.add(fn)
+        else:
+            unwired.add(fn)
+    print(f"WIRED ({len(wired)}):")
+    for fn in sorted(wired):
+        print(f"  + {fn}")
+    if unwired:
+        print(f"\nUNWIRED ({len(unwired)}):")
+        for fn in sorted(unwired):
+            print(f"  - {fn}")
+
+
+def cmd_pain(args):
+    """
+    Log a pain persistently. Survives compaction.
+    Usage: ./ide pain "description of what hurt and what would fix it"
+           ./ide pain show  — show all logged pains
+           ./ide pain clear — clear the log
+    """
+    pain_file = IDE_ROOT / ".claude" / "pains.md"
+    pain_file.parent.mkdir(parents=True, exist_ok=True)
+
+    if not args:
+        print("Usage: ./ide pain \"what hurt\" or ./ide pain show")
+        return
+
+    if args[0] == "show":
+        if pain_file.exists():
+            print(pain_file.read_text())
+        else:
+            print("No pains logged yet.")
+        return
+
+    if args[0] == "clear":
+        if pain_file.exists():
+            pain_file.unlink()
+            print("Pain log cleared.")
+        return
+
+    # Append pain with timestamp
+    from datetime import datetime
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+    entry = f"- [{ts}] {' '.join(args)}\n"
+    with open(pain_file, "a") as f:
+        f.write(entry)
+    print(f"PAIN LOGGED: {entry.strip()}")
+
+    # Show count
+    lines = pain_file.read_text().strip().splitlines()
+    print(f"Total pains: {len(lines)}")
+
+# ─── main ────────────────────────────────────────────────────────────────
+def cmd_smoke(args):
+    """
+    Full pipeline smoke test: tests + WASM build + perf benchmark.
+    One command to verify nothing is broken.
+    Usage: ./ide smoke
+    """
+    print("── Smoke Test ──")
+    fail = False
+
+    # 1. Rust tests
+    print("  [1/3] Tests...", end=" ", flush=True)
+    r = subprocess.run(
+        ["cargo", "test", "--workspace", "-q"],
+        capture_output=True, text=True, cwd=str(IDE_ROOT), timeout=120,
+    )
+    if r.returncode == 0:
+        # Count tests
+        for line in r.stderr.splitlines():
+            if "test result" in line:
+                print(f"OK ({line.strip()})")
+                break
+        else:
+            print("OK")
+    else:
+        print(f"FAIL\n{r.stderr[:300]}")
+        fail = True
+
+    # 2. WASM build
+    print("  [2/3] WASM...", end=" ", flush=True)
+    r = subprocess.run(
+        ["cargo", "build", "--target", "wasm32-unknown-unknown", "-p", "figma-wasm"],
+        capture_output=True, text=True, cwd=str(IDE_ROOT), timeout=120,
+    )
+    if r.returncode == 0:
+        # wasm-bindgen
+        wasm_file = IDE_ROOT / "target" / "wasm32-unknown-unknown" / "debug" / "figma_wasm.wasm"
+        r2 = subprocess.run(
+            ["wasm-bindgen", str(wasm_file), "--out-dir", str(IDE_ROOT / "app" / "src" / "wasm"), "--target", "web"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if r2.returncode == 0:
+            print("OK")
+        else:
+            print(f"FAIL (bindgen)\n{r2.stderr[:200]}")
+            fail = True
+    else:
+        print(f"FAIL\n{r.stderr[:300]}")
+        fail = True
+
+    # 3. Perf benchmark
+    print("  [3/3] Perf...", end=" ", flush=True)
+    r = subprocess.run(
+        ["cargo", "test", "--package", "figma-renderer", "--test", "apple_website",
+         "perf_80k", "--", "--exact", "--nocapture"],
+        capture_output=True, text=True, cwd=str(IDE_ROOT), timeout=120,
+    )
+    for line in r.stdout.splitlines() + r.stderr.splitlines():
+        if "ms/frame" in line.lower() or "TOTAL" in line:
+            ms_match = None
+            for part in line.split():
+                try:
+                    ms_match = float(part.replace("ms/frame", ""))
+                except ValueError:
+                    pass
+            if ms_match and ms_match < 16.6:
+                print(f"OK ({line.strip()})")
+            elif ms_match:
+                print(f"SLOW ({line.strip()})")
+            else:
+                print(line.strip())
+            break
+    else:
+        if r.returncode == 0:
+            print("OK (no timing found)")
+        else:
+            print("FAIL")
+            fail = True
+
+    print()
+    if fail:
+        print("SMOKE: FAIL")
+        sys.exit(1)
+    else:
+        print("SMOKE: OK — all checks passed")
+
+
+def cmd_keys(args):
+    """
+    List all keyboard shortcuts registered in main.ts.
+    Usage: ./ide keys
+    """
+    main_ts = IDE_ROOT / "app" / "src" / "main.ts"
+    if not main_ts.exists():
+        print("main.ts not found")
+        return
+
+    shortcuts = []
+    lines = main_ts.read_text().splitlines()
+    import re
+    for i, line in enumerate(lines, 1):
+        stripped = line.strip()
+        # Match patterns like: e.key === 'x', e.code === 'Space'
+        # Also Cmd/Ctrl combos
+        if "e.key ===" in stripped or "e.code ===" in stripped:
+            # Extract the key
+            keys_found = re.findall(r"e\.(?:key|code)\s*===\s*'([^']+)'", stripped)
+            has_meta = "metaKey" in stripped or "ctrlKey" in stripped
+            has_shift = "shiftKey" in stripped
+
+            # Find what it does — look at next few lines for the action
+            action = ""
+            for j in range(i, min(i + 5, len(lines))):
+                aline = lines[j].strip()
+                if "app." in aline:
+                    action = re.search(r"app\.(\w+)", aline)
+                    action = action.group(1) if action else ""
+                    break
+                if "=" in aline and "app." not in aline:
+                    action = aline.split("//")[0].strip().rstrip(";")
+                    break
+
+            for key in keys_found:
+                mod = ""
+                if has_meta:
+                    mod = "Cmd+"
+                if has_shift:
+                    mod += "Shift+"
+                shortcuts.append((f"{mod}{key}", action, i))
+
+    print(f"── {len(shortcuts)} Keyboard Shortcuts ──")
+    for combo, action, line in shortcuts:
+        print(f"  {combo:20s} → {action:30s} (line {line})")
+
+def cmd_todo(args):
+    """
+    Scan codebase for TODO/FIXME/HACK comments.
+    Usage: ./ide todo          — all TODOs
+           ./ide todo <filter> — grep within TODOs
+    """
+    filter_term = args[0].lower() if args else None
+    todos = []
+    for ext in ("*.rs", "*.ts"):
+        for path in IDE_ROOT.rglob(ext):
+            if "target" in str(path) or "node_modules" in str(path) or "/wasm/" in str(path) and path.name.endswith(".d.ts"):
+                continue
+            try:
+                for i, line in enumerate(path.read_text().splitlines(), 1):
+                    stripped = line.strip()
+                    for marker in ("TODO", "FIXME", "HACK", "XXX"):
+                        if marker in stripped:
+                            rel = path.relative_to(IDE_ROOT)
+                            text = stripped.lstrip("/ ").lstrip("*").strip()
+                            if filter_term and filter_term not in text.lower():
+                                continue
+                            todos.append((str(rel), i, marker, text))
+                            break
+            except Exception:
+                pass
+
+    if not todos:
+        print("No TODOs found." if not filter_term else f"No TODOs matching '{filter_term}'.")
+        return
+
+    print(f"── {len(todos)} TODOs ──")
+    for rel, line, marker, text in sorted(todos):
+        print(f"  {rel}:{line}  {text[:90]}")
+
+def cmd_deps(args):
+    """
+    Show crate dependency graph and public API surface.
+    Usage: ./ide deps          — full graph
+           ./ide deps <crate>  — what depends on <crate> + its exports
+    """
+    crates_dir = IDE_ROOT / "crates"
+    # Build dependency map
+    dep_map = {}  # crate_name -> [dependencies]
+    reverse_map = {}  # crate_name -> [dependents]
+    crate_dirs = {}
+    for toml_path in sorted(crates_dir.glob("*/Cargo.toml")):
+        crate_name = None
+        deps = []
+        in_deps = False
+        for line in toml_path.read_text().splitlines():
+            if line.strip().startswith("name ="):
+                crate_name = line.split('"')[1]
+            if line.strip() == "[dependencies]":
+                in_deps = True
+                continue
+            if line.strip().startswith("[") and in_deps:
+                in_deps = False
+            if in_deps and "figma-" in line:
+                dep_name = line.split("=")[0].strip()
+                deps.append(dep_name)
+        if crate_name:
+            dep_map[crate_name] = deps
+            crate_dirs[crate_name] = toml_path.parent
+            reverse_map.setdefault(crate_name, [])
+            for d in deps:
+                reverse_map.setdefault(d, []).append(crate_name)
+
+    # Also count pub items
+    def count_pub(crate_dir):
+        pub_fns = 0
+        pub_structs = 0
+        pub_enums = 0
+        for rs in crate_dir.rglob("*.rs"):
+            for line in rs.read_text().splitlines():
+                stripped = line.strip()
+                if stripped.startswith("pub fn ") or stripped.startswith("pub async fn "):
+                    pub_fns += 1
+                elif stripped.startswith("pub struct "):
+                    pub_structs += 1
+                elif stripped.startswith("pub enum "):
+                    pub_enums += 1
+        return pub_fns, pub_structs, pub_enums
+
+    filter_crate = args[0] if args else None
+
+    if filter_crate:
+        # Find matching crate
+        match = None
+        for name in dep_map:
+            if filter_crate in name:
+                match = name
+                break
+        if not match:
+            print(f"No crate matching '{filter_crate}'")
+            sys.exit(1)
+        fns, structs, enums = count_pub(crate_dirs[match])
+        print(f"── {match} ──")
+        print(f"  Depends on: {', '.join(dep_map[match]) or '(none)'}")
+        print(f"  Used by:    {', '.join(reverse_map.get(match, [])) or '(none)'}")
+        print(f"  Public API: {fns} fns, {structs} structs, {enums} enums")
+        # Show pub fn signatures
+        print()
+        for rs in sorted(crate_dirs[match].rglob("*.rs")):
+            rel = rs.relative_to(crate_dirs[match])
+            found = []
+            for i, line in enumerate(rs.read_text().splitlines(), 1):
+                stripped = line.strip()
+                if stripped.startswith("pub fn ") or stripped.startswith("pub async fn "):
+                    sig = stripped.split("{")[0].strip()
+                    if sig.endswith(","):
+                        sig = sig[:-1] + "..."
+                    found.append(f"    {i}: {sig}")
+            if found:
+                print(f"  {rel}:")
+                for f in found:
+                    print(f)
+    else:
+        # Full graph
+        print("── Crate Dependency Graph ──")
+        print()
+        # Topological display
+        printed = set()
+        def print_crate(name, depth=0):
+            if name in printed:
+                return
+            # Print deps first
+            for d in dep_map.get(name, []):
+                print_crate(d, depth)
+            printed.add(name)
+            fns, structs, enums = count_pub(crate_dirs[name])
+            indent = "  " * depth
+            deps_str = f" → {', '.join(dep_map[name])}" if dep_map[name] else ""
+            used_str = f" ← {', '.join(reverse_map.get(name, []))}" if reverse_map.get(name, []) else ""
+            print(f"  {name:20s} {fns:3d} fns  {structs:2d} structs  {enums:2d} enums{deps_str}{used_str}")
+
+        for name in sorted(dep_map.keys()):
+            print_crate(name)
+
+        print()
+        print("  Arrow: → depends on, ← used by")
+
+def cmd_test_import(args):
+    """
+    Headless .fig import validation — no browser needed.
+    Checks all 5 fig JSON files parse and have expected node counts.
+    Usage: ./ide test-import
+    """
+    imports_dir = IDE_ROOT / "imports"
+    expected = {
+        "Coffee Shop Mobile App Design (Community)-extracted": {"json": "canvas.json", "min_nodes": 1400},
+        "apple-extracted": {"json": "canvas.json", "min_nodes": 19000},
+        "GEE! ME 100 Characters Pack (Community)-extracted": {"json": "canvas.json", "min_nodes": 11000},
+        "iOS 16 UI Kit for Figma (Community)-extracted": {"json": "canvas.json", "min_nodes": 7900},
+        "Relume Figma Kit (v3.7) (Community)-extracted": {"json": "canvas.json", "min_nodes": 100000},
+    }
+
+    passed = 0
+    failed = 0
+    total_nodes = 0
+
+    for dir_name, spec in expected.items():
+        json_path = imports_dir / dir_name / spec["json"]
+        if not json_path.exists():
+            print(f"  FAIL  {dir_name}: {spec['json']} not found")
+            failed += 1
+            continue
+
+        try:
+            data = json.loads(json_path.read_text())
+        except Exception as e:
+            print(f"  FAIL  {dir_name}: JSON parse error: {e}")
+            failed += 1
+            continue
+
+        # Count nodes recursively
+        def count_nodes(node):
+            n = 1
+            for child in node.get("children", []):
+                n += count_nodes(child)
+            return n
+
+        nodes = 0
+        doc = data.get("document", {})
+        for page in doc.get("children", []):
+            nodes += count_nodes(page)
+
+        total_nodes += nodes
+        if nodes >= spec["min_nodes"]:
+            print(f"  OK    {dir_name}: {nodes:,} nodes")
+            passed += 1
+        else:
+            print(f"  FAIL  {dir_name}: {nodes:,} nodes (expected >= {spec['min_nodes']:,})")
+            failed += 1
+
+    # Also check images exist
+    image_dirs = 0
+    image_count = 0
+    for dir_name in expected:
+        img_dir = imports_dir / dir_name / "images"
+        if img_dir.is_dir():
+            image_dirs += 1
+            image_count += len(list(img_dir.iterdir()))
+
+    print()
+    print(f"  Files:  {passed}/{len(expected)} pass")
+    print(f"  Nodes:  {total_nodes:,} total")
+    print(f"  Images: {image_count:,} across {image_dirs} dirs")
+
+    if failed > 0:
+        print(f"\nIMPORT: FAIL ({failed} failures)")
+        sys.exit(1)
+    else:
+        print(f"\nIMPORT: OK")
+
+
+def cmd_compare(args):
+    """
+    Pixel comparison: our render vs reference (Figma screenshot).
+    Usage: ./ide compare <reference.png> <ours.png>
+           ./ide compare <reference.png> <ours.png> --html  (open visual diff)
+
+    Outputs: SSIM score, pixel diff count, and difference image.
+    SSIM > 0.95 = visually close. SSIM < 0.80 = major gaps.
+    """
+    if len(args) < 2:
+        print("Usage: ./ide compare <reference.png> <ours.png> [--html]")
+        sys.exit(1)
+
+    ref_path = Path(args[0])
+    our_path = Path(args[1])
+    html_mode = "--html" in args
+
+    if not ref_path.exists():
+        print(f"Reference not found: {ref_path}")
+        sys.exit(1)
+    if not our_path.exists():
+        print(f"Our render not found: {our_path}")
+        sys.exit(1)
+
+    # Use Python + PIL for comparison (available via Pillow)
+    try:
+        from PIL import Image as PILImage
+        import math
+    except ImportError:
+        print("Pillow not installed. Run: pip install Pillow")
+        sys.exit(1)
+
+    ref_img = PILImage.open(ref_path).convert("RGBA")
+    our_img = PILImage.open(our_path).convert("RGBA")
+
+    # Resize our image to match reference if needed
+    if ref_img.size != our_img.size:
+        print(f"  Size mismatch: ref={ref_img.size} ours={our_img.size}")
+        our_img = our_img.resize(ref_img.size, PILImage.Resampling.LANCZOS)
+        print(f"  Resized ours to {ref_img.size}")
+
+    w, h = ref_img.size
+    ref_px = ref_img.load()
+    our_px = our_img.load()
+
+    # Compute per-pixel difference
+    diff_img = PILImage.new("RGBA", (w, h))
+    diff_px = diff_img.load()
+    total_diff = 0
+    pixel_diffs = 0
+    max_diff = 0
+
+    for y in range(h):
+        for x in range(w):
+            r1, g1, b1, a1 = ref_px[x, y]
+            r2, g2, b2, a2 = our_px[x, y]
+            dr = abs(r1 - r2)
+            dg = abs(g1 - g2)
+            db = abs(b1 - b2)
+            da = abs(a1 - a2)
+            pixel_err = dr + dg + db + da
+            total_diff += pixel_err
+            if pixel_err > 10:  # threshold: ignore sub-pixel rounding
+                pixel_diffs += 1
+                # Highlight differences in red
+                intensity = min(255, pixel_err * 2)
+                diff_px[x, y] = (intensity, 0, 0, 255)
+            else:
+                # Show original dimmed
+                diff_px[x, y] = (r2 // 3, g2 // 3, b2 // 3, 128)
+            max_diff = max(max_diff, pixel_err)
+
+    total_pixels = w * h
+    diff_pct = (pixel_diffs / total_pixels) * 100
+    avg_err = total_diff / (total_pixels * 4)  # per channel average
+
+    # Simple SSIM approximation (luminance-based)
+    # Real SSIM needs windowed stats, this is a fast approximation
+    ref_lum = []
+    our_lum = []
+    for y in range(h):
+        for x in range(w):
+            r1, g1, b1, a1 = ref_px[x, y]
+            r2, g2, b2, a2 = our_px[x, y]
+            ref_lum.append(0.299 * r1 + 0.587 * g1 + 0.114 * b1)
+            our_lum.append(0.299 * r2 + 0.587 * g2 + 0.114 * b2)
+
+    n = len(ref_lum)
+    mean_r = sum(ref_lum) / n
+    mean_o = sum(our_lum) / n
+    var_r = sum((x - mean_r) ** 2 for x in ref_lum) / n
+    var_o = sum((x - mean_o) ** 2 for x in our_lum) / n
+    cov = sum((ref_lum[i] - mean_r) * (our_lum[i] - mean_o) for i in range(n)) / n
+
+    C1 = (0.01 * 255) ** 2
+    C2 = (0.03 * 255) ** 2
+    ssim = ((2 * mean_r * mean_o + C1) * (2 * cov + C2)) / \
+           ((mean_r ** 2 + mean_o ** 2 + C1) * (var_r + var_o + C2))
+
+    # Save diff image
+    diff_path = our_path.parent / f"{our_path.stem}_diff.png"
+    diff_img.save(diff_path)
+
+    print(f"  Reference: {ref_path.name} ({w}x{h})")
+    print(f"  Ours:      {our_path.name}")
+    print(f"  SSIM:      {ssim:.4f}")
+    print(f"  Diff:      {pixel_diffs:,}/{total_pixels:,} pixels ({diff_pct:.1f}%)")
+    print(f"  Avg err:   {avg_err:.2f}/255 per channel")
+    print(f"  Max err:   {max_diff}")
+    print(f"  Diff img:  {diff_path}")
+
+    if ssim >= 0.95:
+        print(f"\nCOMPARE: CLOSE (SSIM {ssim:.4f})")
+    elif ssim >= 0.80:
+        print(f"\nCOMPARE: GAPS (SSIM {ssim:.4f})")
+    else:
+        print(f"\nCOMPARE: MAJOR DIFFERENCES (SSIM {ssim:.4f})")
+
+    if html_mode:
+        html_path = our_path.parent / f"{our_path.stem}_compare.html"
+        import base64
+        def img_to_data_uri(img):
+            import io
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return base64.b64encode(buf.getvalue()).decode()
+
+        html = f"""<!DOCTYPE html><html><head><style>
+        body {{ font-family: monospace; background: #111; color: #fff; display: flex; flex-wrap: wrap; gap: 10px; padding: 10px; }}
+        .panel {{ text-align: center; }}
+        img {{ max-width: 600px; border: 1px solid #333; }}
+        h3 {{ margin: 5px 0; }}
+        </style></head><body>
+        <div class="panel"><h3>Reference (Figma)</h3><img src="data:image/png;base64,{img_to_data_uri(ref_img)}"></div>
+        <div class="panel"><h3>Ours (SSIM: {ssim:.4f})</h3><img src="data:image/png;base64,{img_to_data_uri(our_img)}"></div>
+        <div class="panel"><h3>Diff ({diff_pct:.1f}% pixels)</h3><img src="data:image/png;base64,{img_to_data_uri(diff_img)}"></div>
+        </body></html>"""
+        html_path.write_text(html)
+        print(f"  HTML:      {html_path}")
+        subprocess.run(["open", str(html_path)])
+
+
+COMMANDS = {
+    "orient": cmd_orient,
+    "check": cmd_check,
+    "contract": cmd_contract,
+    "scaffold": cmd_scaffold,
+    "decide": cmd_decide,
+    "task": cmd_task,
+    "module": cmd_module,
+    "verify": cmd_verify,
+    "survey": cmd_survey,
+    "diff-check": cmd_diff_check,
+    "coherence": cmd_coherence,
+    "boundary": cmd_boundary,
+    "slice": cmd_slice,
+    "journal": cmd_journal,
+    "focus": cmd_focus,
+    "api": cmd_api,
+    "snapshot": cmd_snapshot,
+    "quick": cmd_quick,
+    "impact": cmd_impact,
+    "profile": cmd_profile,
+    "visual": cmd_visual,
+    "fps": cmd_fps,
+    "workflow": cmd_workflow,
+    "gap": cmd_gap,
+    "progress": cmd_progress,
+    "size": cmd_size,
+    "hot": cmd_hot,
+    "debt": cmd_debt,
+    "wired": cmd_wired,
+    "smoke": cmd_smoke,
+    "deps": cmd_deps,
+    "todo": cmd_todo,
+    "keys": cmd_keys,
+    "pain": cmd_pain,
+    "test-import": cmd_test_import,
+    "compare": cmd_compare,
+}
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] == "help":
+        print("AI-Native IDE — Correctness Construction System")
+        print()
+        print("CORE (use these):")
+        print("  orient [module]     — Where am I? What's next? (~50 tokens)")
+        print("  check [mode]        — Binary compile signal (~20 tokens)")
+        print("  survey <file|dir>   — File skeleton BEFORE editing (~30 tokens)")
+        print("  coherence [file]    — Detect frankenstein'd files (~20 tokens)")
+        print("  api <crate> [filter] — Full API: types + methods (~50 tokens)")
+        print("  boundary <layer>    — Cross-layer API surface (~30 tokens)")
+        print("  slice <sub>         — Track vertical feature slices")
+        print("  journal <sub>       — Algorithmic state capture (survives compaction)")
+        print("  snapshot [sub]      — Render snapshot baseline + diff (~30 tokens)")
+        print("  diff-check          — What changed + compile check")
+        print("  contract <sub>      — Type-level module contracts")
+        print("  scaffold <mod> <dir> — Generate impl skeleton from contract")
+        print("  verify              — Full sweep, minimal output")
+        print()
+        print("SUPPORT (lightweight):")
+        print("  decide <args>       — Record a decision (prevent re-debates)")
+        print("  task <sub>          — Work queue")
+        print("  module <sub>        — Module registry")
+        return
+
+    cmd = sys.argv[1]
+    rest = sys.argv[2:]
+    if cmd in COMMANDS:
+        COMMANDS[cmd](rest)
+    else:
+        print(f"Unknown: {cmd}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,13 @@
+{
+  "id": "t008",
+  "title": "Define CRDT contract",
+  "status": "done",
+  "blocked_by": [],
+  "module": "crdt",
+  "subtasks": [],
+  "acceptance": [
+    "Contract compiles",
+    "Commutativity enforced by types"
+  ],
+  "outcome": "CRDT operation types, apply function, and history. Compiles native+WASM. Exhaustive match enforces correctness."
+}

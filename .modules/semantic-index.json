@@ -1,0 +1,11 @@
+{
+  "name": "semantic-index",
+  "purpose": "AST-backed queryable code index",
+  "status": "not-started",
+  "public_api": [],
+  "dependencies": [],
+  "files": [],
+  "tests": "",
+  "known_issues": [],
+  "decisions": []
+}

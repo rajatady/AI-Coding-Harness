@@ -1,0 +1,14 @@
+{
+  "id": "t027",
+  "title": "IDE tool: Focus lock (scope constraint per crate)",
+  "status": "done",
+  "blocked_by": [],
+  "module": "ide",
+  "subtasks": [],
+  "acceptance": [
+    "focus set/show/clear",
+    "Pain-check detects focus violations",
+    "Prevents cross-crate sprawl"
+  ],
+  "outcome": ""
+}

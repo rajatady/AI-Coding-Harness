@@ -1,0 +1,14 @@
+{
+  "id": "t012",
+  "title": "Stroke rendering",
+  "status": "done",
+  "blocked_by": [],
+  "module": "figma-renderer",
+  "subtasks": [],
+  "acceptance": [
+    "Stroke weight renders correctly",
+    "Inside/center/outside alignment",
+    "Stroke caps and joins"
+  ],
+  "outcome": "Stroke rendering via path expansion. Supports center/inside/outside alignment, round/square/none caps. Compiles, tests pass."
+}

@@ -1,0 +1,13 @@
+{
+  "id": "t003",
+  "title": "Build context manager",
+  "status": "done",
+  "blocked_by": [],
+  "module": "context-manager",
+  "subtasks": [],
+  "acceptance": [
+    "Given a task, returns ranked relevant files",
+    "Can produce compressed summaries"
+  ],
+  "outcome": "CANCELLED: Rust type system replaces context manager for correctness"
+}

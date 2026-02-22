@@ -1,0 +1,9 @@
+{
+  "id": "d003",
+  "timestamp": "2026-02-21T19:08:05.464668",
+  "question": "Build order?",
+  "choice": "Continuity tools first, then semantic index, then Figma clone to stress-test",
+  "why": "Without continuity I lose context building the index. Without the index the Figma clone is impossible.",
+  "alternatives_rejected": [],
+  "affects": []
+}

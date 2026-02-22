@@ -1,0 +1,16 @@
+[package]
+name = "figma-server"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+figma-engine = { path = "../engine" }
+figma-crdt = { path = "../crdt" }
+fig2json = { path = "/tmp/fig2json" }
+axum = { workspace = true, features = ["ws"] }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tower-http = { version = "0.6", features = ["fs", "cors"] }
+axum-extra = { version = "0.10", features = ["typed-header"] }
+base64 = "0.21"

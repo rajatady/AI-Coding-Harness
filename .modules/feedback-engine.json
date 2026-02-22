@@ -1,0 +1,11 @@
+{
+  "name": "feedback-engine",
+  "purpose": "Structured test/lint/typecheck results",
+  "status": "not-started",
+  "public_api": [],
+  "dependencies": [],
+  "files": [],
+  "tests": "",
+  "known_issues": [],
+  "decisions": []
+}

@@ -1,0 +1,15 @@
+{
+  "id": "t002",
+  "title": "Build semantic index for TypeScript",
+  "status": "done",
+  "blocked_by": [],
+  "module": "semantic-index",
+  "subtasks": [],
+  "acceptance": [
+    "Can index a TS project",
+    "Can query symbols by name",
+    "Can query file dependencies",
+    "Can query references to a symbol"
+  ],
+  "outcome": "CANCELLED: Rust compiler replaces semantic index. Types do verification."
+}

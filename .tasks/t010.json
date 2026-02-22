@@ -1,0 +1,15 @@
+{
+  "id": "t010",
+  "title": "Proper affine transforms in rasterizer",
+  "status": "done",
+  "blocked_by": [],
+  "module": "figma-renderer",
+  "subtasks": [],
+  "acceptance": [
+    "Rotation works",
+    "Scale works",
+    "Skew works",
+    "Inverse transform for point-in-shape testing"
+  ],
+  "outcome": "Inverse affine transforms implemented. All rasterize functions use inv transform. Rotation verified via render test."
+}

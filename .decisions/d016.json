@@ -1,0 +1,8 @@
+{
+  "id": "d016",
+  "timestamp": "2026-02-21T20:39:16.621973",
+  "question": "Frontend framework choice",
+  "choice": "No framework \u2014 vanilla TypeScript with strict mode",
+  "why": "Every framework is permanent context tax. Figma UI is mostly static panels with data binding. Web Components or vanilla TS modules with strict typing. No React, no Next.js, no Vue.",
+  "affects": []
+}

@@ -1,0 +1,14 @@
+{
+  "id": "t020",
+  "title": "Constraint-based resize",
+  "status": "pending",
+  "blocked_by": [],
+  "module": "figma-engine",
+  "subtasks": [],
+  "acceptance": [
+    "Pin to edges",
+    "Scale proportionally",
+    "Center constraints"
+  ],
+  "outcome": ""
+}

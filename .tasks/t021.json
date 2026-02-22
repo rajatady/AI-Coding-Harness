@@ -1,0 +1,14 @@
+{
+  "id": "t021",
+  "title": "Pen tool / vector editing",
+  "status": "pending",
+  "blocked_by": [],
+  "module": "figma-wasm",
+  "subtasks": [],
+  "acceptance": [
+    "Create paths interactively",
+    "Edit bezier handles",
+    "Close paths"
+  ],
+  "outcome": ""
+}

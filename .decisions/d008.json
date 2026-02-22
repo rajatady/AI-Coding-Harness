@@ -1,0 +1,8 @@
+{
+  "id": "d008",
+  "timestamp": "2026-02-21T19:33:28.865577",
+  "question": "Should I still build a semantic index?",
+  "choice": "No. Rust compiler already does symbol resolution, type checking, cross-references. Building a second one wastes effort.",
+  "why": "The compiler is the best code intelligence tool. cargo check tells me everything.",
+  "affects": []
+}

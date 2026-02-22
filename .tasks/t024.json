@@ -1,0 +1,12 @@
+{
+  "id": "t024",
+  "title": "Restructure frontend: TypeScript project + Rust server scaffold",
+  "status": "done",
+  "blocked_by": [],
+  "module": "figma-frontend",
+  "subtasks": [],
+  "acceptance": [
+    "Move inline HTML/JS to proper TS project with strict mode. Add axum server crate. First vertical slice: create-rectangle end-to-end."
+  ],
+  "outcome": ""
+}
