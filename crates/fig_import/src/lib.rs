@@ -45,20 +45,24 @@ pub fn convert_fig(bytes: &[u8]) -> Result<FigImportResult> {
     let json = decode::decode_fig_to_json(&parsed.chunks[0], &parsed.chunks[1])?;
 
     // 5. Extract nodeChanges and build tree
-    let node_changes = json
-        .get("nodeChanges")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| FigError::DecodeError("No nodeChanges in decoded data".into()))?
-        .clone();
+    // Take ownership to avoid cloning (critical for large files — apple.fig is 97MB)
+    let mut json_map = match json {
+        serde_json::Value::Object(map) => map,
+        _ => return Err(FigError::DecodeError("Decoded data is not an object".into())),
+    };
+
+    let node_changes = match json_map.remove("nodeChanges") {
+        Some(serde_json::Value::Array(arr)) => arr,
+        _ => return Err(FigError::DecodeError("No nodeChanges in decoded data".into())),
+    };
 
     let mut document = tree::build_tree(node_changes)?;
 
     // 6. Process and substitute blobs
-    let blobs_arr = json
-        .get("blobs")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
+    let blobs_arr = match json_map.remove("blobs") {
+        Some(serde_json::Value::Array(arr)) => arr,
+        _ => Vec::new(),
+    };
 
     let processed_blobs = blobs::process_blobs(blobs_arr)?;
     blobs::substitute_blobs(&mut document, &processed_blobs)?;

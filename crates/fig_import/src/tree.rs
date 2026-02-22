@@ -6,15 +6,12 @@ use std::collections::HashMap;
 
 /// Build a hierarchical tree from flat nodeChanges.
 /// Returns the root node (guid "0:0") with children attached.
+/// Takes ownership of the vec to avoid cloning (critical for large files like apple.fig 97MB).
 pub fn build_tree(node_changes: Vec<JsonValue>) -> Result<JsonValue> {
-    let mut nodes: HashMap<String, JsonValue> = HashMap::new();
+    let mut nodes: HashMap<String, JsonValue> = HashMap::with_capacity(node_changes.len());
     let mut parent_to_children: HashMap<String, Vec<(String, String)>> = HashMap::new();
 
-    for node in &node_changes {
-        let guid = format_guid(node)?;
-        nodes.insert(guid, node.clone());
-    }
-
+    // First pass: collect parent→child relationships (read-only)
     for node in &node_changes {
         if let Some(parent_index) = node.get("parentIndex") {
             let parent_guid = format_parent_guid(parent_index)?;
@@ -24,7 +21,6 @@ pub fn build_tree(node_changes: Vec<JsonValue>) -> Result<JsonValue> {
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-
             parent_to_children
                 .entry(parent_guid)
                 .or_default()
@@ -32,23 +28,28 @@ pub fn build_tree(node_changes: Vec<JsonValue>) -> Result<JsonValue> {
         }
     }
 
+    // Second pass: take ownership of nodes (no clone!)
+    for node in node_changes {
+        let guid = format_guid(&node)?;
+        nodes.insert(guid, node);
+    }
+
     // Sort children by position
     for children in parent_to_children.values_mut() {
         children.sort_by(|a, b| a.0.cmp(&b.0));
     }
 
-    build_node_tree("0:0", &nodes, &parent_to_children)
+    build_node_tree("0:0", &mut nodes, &parent_to_children)
 }
 
 fn build_node_tree(
     guid: &str,
-    nodes: &HashMap<String, JsonValue>,
+    nodes: &mut HashMap<String, JsonValue>,
     parent_to_children: &HashMap<String, Vec<(String, String)>>,
 ) -> Result<JsonValue> {
     let mut node = nodes
-        .get(guid)
-        .ok_or_else(|| FigError::TreeError(format!("Node {} not found", guid)))?
-        .clone();
+        .remove(guid)
+        .ok_or_else(|| FigError::TreeError(format!("Node {} not found", guid)))?;
 
     if let Some(obj) = node.as_object_mut() {
         obj.remove("parentIndex");
@@ -56,7 +57,7 @@ fn build_node_tree(
         if let Some(child_entries) = parent_to_children.get(guid) {
             let mut children = Vec::new();
             for (_position, child_guid) in child_entries {
-                let child_node = build_node_tree(child_guid, nodes, parent_to_children)?;
+                let child_node = build_node_tree(child_guid, &mut *nodes, parent_to_children)?;
                 children.push(child_node);
             }
             if !children.is_empty() {

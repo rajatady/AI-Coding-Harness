@@ -1,21 +1,20 @@
 # RECOVERY — Context was compacted. Read this.
-# Generated: Mon Feb 23 02:38:48 IST 2026
+# Generated: Mon Feb 23 03:12:56 IST 2026
 
 ## You were working on:
 
 
 ## Build state:
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.27s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.07s
 
 ## Recently modified files:
-/Users/kumardivyarajat/WebstormProjects/myide/app/src/main.ts
+/Users/kumardivyarajat/WebstormProjects/myide/crates/fig_import/src/lib.rs
+/Users/kumardivyarajat/WebstormProjects/myide/crates/fig_import/src/tree.rs
 /Users/kumardivyarajat/WebstormProjects/myide/app/pkg/figma_wasm_bg.wasm.d.ts
 /Users/kumardivyarajat/WebstormProjects/myide/app/pkg/figma_wasm.d.ts
-/Users/kumardivyarajat/WebstormProjects/myide/crates/wasm/src/bench.rs
-/Users/kumardivyarajat/WebstormProjects/myide/crates/wasm/src/lib.rs
+/Users/kumardivyarajat/WebstormProjects/myide/app/src/main.ts
 
 ## Latest journal entry:
-PERF ACHIEVED: 80K objects at 60fps+ in browser. Fresh load: 78fps. Pan: 128-1111fps (scene cache). Zoom: 128-588fps. Key optimizations: (1) no Vec alloc in bounds, (2) translation fast-path, (3) row memcpy in to_pixels, (4) scene cache with 2x margin for camera-only changes, (5) world-space viewport culling, (6) layers panel skip >1K nodes.
 Session 7: Fix layers panel virtualization, then multi-page support. Rajat called out disabled panel as wrong approach.
 S7: virtualized layers (45 DOM for 80K), multi-page support (tabs, API), boundary full sigs. Next: demo content.
 S7 mid: layers virtualization, multi-page, 3-page project, drop shadows. 9 spec tests, 8.7ms/frame. Next: p6 auto-layout.
@@ -55,6 +54,7 @@ Session 18 WIN: Built crates/fig_import/ end-to-end. .fig binary -> engine Nodes
 Session 19: Import verified (Coffee Shop + GEE! ME render correctly in browser). Now pivoting to the REAL blocker: 60fps on 1.8M stress test. Status bar shows ~2fps (655ms render). Need to: 1) Build ./ide check fps tool for programmatic FPS measurement 2) Profile WHERE time is spent 3) Fix the bottleneck. Import is DONE - stop re-verifying.
 Session 19 comparison: Opened real Figma Coffee Shop Visual page side-by-side with ours. 3 MAJOR gaps: (1) Images not loading - ZIP images extracted but not fed to canvas image cache, (2) Icons/small vectors render as tiny squares, (3) Some gradients not applying. Text, layout, solid fills, positions all MATCH. Next: fix image loading pipeline - images are in the import result but JS doesn't push them to the rendering layer.
 Session 19 progress: (1) Image loading from .fig ZIP → WASM → JS imageCache WORKS. 51/51 images loaded for Coffee Shop. Coffee promo banner image renders correctly. (2) Added imported_images HashMap to FigmaApp, get_imported_image() WASM method, exposed _imageCache on window. (3) Side-by-side comparison with real Figma shows: text/layout/colors MATCH, images NOW LOADING, but product card images still gray (may be component instances not resolved), some gradients missing, icons render as small squares. (4) SSIM -0.14 (not meaningful - different zoom/viewport). Next: ensure importFigFile() in main.ts properly loads images (currently only works via manual JS), then tackle remaining fidelity gaps.
+Session 20: FPS confirmed solved (196fps median pan, 217fps edit, 154fps p95). Updated memory files. Built import fidelity matrix. ZERO code written - all audit. Starting real work now: auto-layout computation in fig_import.rs, then component flattening, then masks, then booleans. Target: Coffee Shop renders 1:1 with Figma.
 
 ## REMEMBER:
 - FIRST: Run ./ide orient, then ./ide journal show — your working state is there
