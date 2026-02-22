@@ -1,0 +1,8 @@
+{
+  "id": "d015",
+  "timestamp": "2026-02-21T20:39:14.325789",
+  "question": "How to scale across layers without context explosion",
+  "choice": "2-language max (Rust+TS), boundary contracts, vertical slices",
+  "why": "Rust for: engine, renderer, CRDT, server (axum), DB (SQLite), WebSocket. TypeScript for frontend only. No React/Next.js \u2014 vanilla TS with strict typing. ./ide boundary tool for cross-layer API surfaces.",
+  "affects": []
+}

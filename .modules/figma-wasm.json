@@ -1,0 +1,10 @@
+{
+  "name": "figma-wasm",
+  "purpose": "WASM bindings for browser",
+  "status": "in-progress",
+  "public_api": [],
+  "dependencies": [],
+  "files": [],
+  "known_issues": [],
+  "decisions": []
+}

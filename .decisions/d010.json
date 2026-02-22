@@ -1,0 +1,8 @@
+{
+  "id": "d010",
+  "timestamp": "2026-02-21T19:40:33.128073",
+  "question": "CRDT approach?",
+  "choice": "Operation-based CRDT (op-based) with Lamport timestamps for total ordering",
+  "why": "Op-based is simpler than state-based for a tree structure. Each operation is a small message. Lamport clocks (already in id.rs) give total ordering for conflict resolution. The operation types are an enum \u2014 compiler enforces that all ops are handled.",
+  "affects": []
+}

@@ -1,0 +1,16 @@
+{
+  "id": "t001",
+  "title": "Complete continuity module",
+  "status": "done",
+  "blocked_by": [],
+  "module": "continuity",
+  "subtasks": [],
+  "acceptance": [
+    "orient command works",
+    "decide command works",
+    "task command works",
+    "module command works",
+    "verify command works"
+  ],
+  "outcome": "All 5 commands work: orient, decide, task, module, verify. Zero dependencies. Pure Python."
+}

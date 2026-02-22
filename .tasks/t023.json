@@ -1,0 +1,14 @@
+{
+  "id": "t023",
+  "title": "Performance: dirty tile tracking",
+  "status": "pending",
+  "blocked_by": [],
+  "module": "figma-renderer",
+  "subtasks": [],
+  "acceptance": [
+    "Only re-render changed tiles",
+    "Track which nodes changed",
+    "10x fewer tiles rendered on update"
+  ],
+  "outcome": ""
+}

@@ -1,0 +1,15 @@
+{
+  "name": "continuity",
+  "purpose": "Shell tools for state tracking, orientation, and decision logging",
+  "status": "complete",
+  "public_api": [],
+  "dependencies": [],
+  "files": [
+    "ide",
+    "STATE.md",
+    "ARCHITECTURE.md"
+  ],
+  "tests": "",
+  "known_issues": [],
+  "decisions": []
+}

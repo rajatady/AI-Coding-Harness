@@ -1,0 +1,48 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/kumardivyarajat/WebstormProjects/myide/.claude/hooks/count-tools.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/kumardivyarajat/WebstormProjects/myide/.claude/hooks/pain-check.sh",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/kumardivyarajat/WebstormProjects/myide/.claude/hooks/pre-compact.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/kumardivyarajat/WebstormProjects/myide/.claude/hooks/session-state.sh",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

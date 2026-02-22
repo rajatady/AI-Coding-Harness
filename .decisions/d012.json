@@ -1,0 +1,8 @@
+{
+  "id": "d012",
+  "timestamp": "2026-02-21T19:55:13.857830",
+  "question": "What are the next critical features for a real Figma clone?",
+  "choice": "Path rendering, text rendering, rounded corners, transforms with rotation, auto-layout, undo/redo, interactive editing (selection, drag, resize)",
+  "why": "Current renderer only handles axis-aligned solid-fill rects. Need full path rasterization for vectors, text shaping, and proper affine transforms.",
+  "affects": []
+}

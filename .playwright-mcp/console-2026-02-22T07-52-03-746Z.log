@@ -1,0 +1,18 @@
+[      88ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:3000/favicon.ico:0
+[  158642ms] [ERROR] WebSocket connection to 'ws://localhost:3000/api/ws/default' failed:  @ http://localhost:3000/src/main.ts?t=1771746872436:509
+[  158642ms] [ERROR] WebSocket connection to 'ws://localhost:3000/?token=zerwryvnlO45' failed:  @ http://localhost:3000/@vite/client:801
+[  158705ms] [ERROR] WebSocket connection to 'ws://localhost:3000/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/@vite/client:1034
+[  159708ms] [ERROR] WebSocket connection to 'ws://localhost:3000/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/@vite/client:1034
+[  160645ms] [ERROR] WebSocket connection to 'ws://localhost:3000/api/ws/default' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/src/main.ts?t=1771746872436:509
+[  160710ms] [ERROR] WebSocket connection to 'ws://localhost:3000/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/@vite/client:1034
+[  161713ms] [ERROR] WebSocket connection to 'ws://localhost:3000/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/@vite/client:1034
+[  162651ms] [ERROR] WebSocket connection to 'ws://localhost:3000/api/ws/default' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/src/main.ts?t=1771746872436:509
+[  162718ms] [ERROR] WebSocket connection to 'ws://localhost:3000/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/@vite/client:1034
+[  163742ms] [ERROR] WebSocket connection to 'ws://localhost:3000/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/@vite/client:1034
+[  164667ms] [ERROR] WebSocket connection to 'ws://localhost:3000/api/ws/default' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/src/main.ts?t=1771746872436:509
+[  164803ms] [ERROR] WebSocket connection to 'ws://localhost:3000/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/@vite/client:1034
+[  165926ms] [ERROR] WebSocket connection to 'ws://localhost:3000/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/@vite/client:1034
+[  166751ms] [ERROR] WebSocket connection to 'ws://localhost:3000/api/ws/default' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/src/main.ts?t=1771746872436:509
+[  167452ms] [ERROR] WebSocket connection to 'ws://localhost:3000/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/@vite/client:1034
+[  169100ms] [ERROR] WebSocket connection to 'ws://localhost:3000/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/@vite/client:1034
+[  169817ms] [ERROR] WebSocket connection to 'ws://localhost:3000/api/ws/default' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/src/main.ts?t=1771746872436:509

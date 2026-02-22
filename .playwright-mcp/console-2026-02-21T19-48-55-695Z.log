@@ -1,0 +1,3 @@
+[  240066ms] [ERROR] WebSocket connection to 'ws://localhost:3000/api/ws/default' failed: WebSocket opening handshake timed out @ http://localhost:3000/src/main.ts?t=1771703328041:380
+[  482070ms] [ERROR] WebSocket connection to 'ws://localhost:3000/api/ws/default' failed: WebSocket opening handshake timed out @ http://localhost:3000/src/main.ts?t=1771703328041:380
+[  724075ms] [ERROR] WebSocket connection to 'ws://localhost:3000/api/ws/default' failed: WebSocket opening handshake timed out @ http://localhost:3000/src/main.ts?t=1771703328041:380

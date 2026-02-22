@@ -1,0 +1,8 @@
+[package]
+name = "figma-crdt"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+figma-engine = { path = "../engine" }
+serde = { workspace = true }

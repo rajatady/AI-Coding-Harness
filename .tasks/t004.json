@@ -1,0 +1,14 @@
+{
+  "id": "t004",
+  "title": "Stress-test: begin Figma clone project",
+  "status": "done",
+  "blocked_by": [],
+  "module": "figma-clone",
+  "subtasks": [],
+  "acceptance": [
+    "Project scaffold created",
+    "WASM build pipeline works",
+    "First rendering primitive works"
+  ],
+  "outcome": "Project scaffolded. Engine crate has full document model. All compiles."
+}

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Figma Clone — WASM</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #1e1e1e; font-family: system-ui; color: #ccc; overflow: hidden; }
+        #toolbar {
+            display: flex; gap: 8px; padding: 8px 16px; background: #2d2d2d;
+            border-bottom: 1px solid #444; align-items: center; height: 40px;
+        }
+        .tool-btn {
+            padding: 4px 12px; background: #444; border: none; color: #ccc;
+            border-radius: 4px; cursor: pointer; font-size: 12px;
+        }
+        .tool-btn:hover { background: #555; }
+        .tool-btn.active { background: #4285f4; color: white; }
+        #info { margin-left: auto; font-size: 11px; opacity: 0.6; }
+        canvas { display: block; cursor: default; }
+    </style>
+</head>
+<body>
+    <div id="toolbar">
+        <button class="tool-btn" onclick="addRect()">+ Rectangle</button>
+        <button class="tool-btn" onclick="addEllipse()">+ Ellipse</button>
+        <button class="tool-btn" onclick="deleteSelected()">Delete</button>
+        <span id="info">Loading WASM...</span>
+    </div>
+    <canvas id="canvas"></canvas>
+
+    <script type="module">
+        import init, { FigmaApp } from './pkg/figma_wasm.js';
+
+        let app;
+        let canvas, ctx;
+        let animFrameId;
+
+        async function main() {
+            await init();
+            canvas = document.getElementById('canvas');
+            ctx = canvas.getContext('2d');
+
+            // Size canvas to window
+            function resize() {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight - 40;
+            }
+            resize();
+            window.addEventListener('resize', () => { resize(); render(); });
+
+            app = new FigmaApp("Untitled", 1);
+            app.set_viewport(canvas.width, canvas.height);
+
+            // Add some demo shapes
+            app.add_rectangle("Red", 100, 80, 200, 150, 0.9, 0.2, 0.2, 1.0);
+            app.add_rectangle("Blue", 250, 160, 180, 120, 0.2, 0.4, 0.9, 0.9);
+            app.add_rectangle("Green", 400, 100, 160, 200, 0.2, 0.8, 0.3, 1.0);
+            app.add_rectangle("Yellow", 150, 320, 280, 80, 0.95, 0.85, 0.2, 1.0);
+
+            // Add a gradient demo shape
+            app.add_gradient_rectangle(
+                "Gradient", 350, 280, 200, 120,
+                0, 0, 200, 0,  // horizontal gradient: start→end
+                [0.0, 0.5, 1.0],  // stop positions
+                [1.0, 0.0, 0.0, 1.0,  0.0, 1.0, 0.0, 1.0,  0.0, 0.0, 1.0, 1.0]  // red→green→blue
+            );
+
+            // Mouse events
+            canvas.addEventListener('mousedown', (e) => {
+                const hit = app.mouse_down(e.offsetX, e.offsetY);
+                canvas.style.cursor = hit ? 'move' : 'default';
+                render();
+            });
+
+            canvas.addEventListener('mousemove', (e) => {
+                if (e.buttons === 1) {
+                    app.mouse_move(e.offsetX, e.offsetY);
+                    render();
+                }
+            });
+
+            // Zoom with scroll wheel
+            canvas.addEventListener('wheel', (e) => {
+                e.preventDefault();
+            }, { passive: false });
+
+            canvas.addEventListener('mouseup', () => {
+                app.mouse_up();
+                canvas.style.cursor = 'default';
+            });
+
+            // Keyboard
+            window.addEventListener('keydown', (e) => {
+                if (e.key === 'Delete' || e.key === 'Backspace') {
+                    app.delete_selected();
+                    render();
+                }
+            });
+
+            // Expose to toolbar buttons
+            window.addRect = () => {
+                const x = 100 + Math.random() * 400;
+                const y = 100 + Math.random() * 300;
+                const r = Math.random(), g = Math.random(), b = Math.random();
+                app.add_rectangle("Rect", x, y, 120, 80, r, g, b, 1.0);
+                render();
+            };
+            window.addEllipse = () => {
+                const x = 100 + Math.random() * 400;
+                const y = 100 + Math.random() * 300;
+                const r = Math.random(), g = Math.random(), b = Math.random();
+                app.add_ellipse("Ellipse", x, y, 100, 100, r, g, b, 1.0);
+                render();
+            };
+            window.deleteSelected = () => {
+                app.delete_selected();
+                render();
+            };
+
+            render();
+        }
+
+        function render() {
+            const t0 = performance.now();
+            const pixels = app.render(canvas.width, canvas.height);
+            const renderTime = performance.now() - t0;
+
+            const imageData = new ImageData(new Uint8ClampedArray(pixels), canvas.width, canvas.height);
+            ctx.putImageData(imageData, 0, 0);
+
+            const sel = app.get_selected();
+            const selText = sel.length ? ` | Selected: node ${sel[0]}` : '';
+            document.getElementById('info').textContent =
+                `${app.node_count()} nodes | ${renderTime.toFixed(1)}ms${selText}`;
+        }
+
+        main().catch(e => {
+            document.getElementById('info').textContent = `Error: ${e}`;
+            console.error(e);
+        });
+    </script>
+</body>
+</html>

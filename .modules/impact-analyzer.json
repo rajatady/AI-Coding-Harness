@@ -1,0 +1,11 @@
+{
+  "name": "impact-analyzer",
+  "purpose": "What breaks if I change X",
+  "status": "not-started",
+  "public_api": [],
+  "dependencies": [],
+  "files": [],
+  "tests": "",
+  "known_issues": [],
+  "decisions": []
+}

@@ -1,0 +1,10 @@
+{
+  "name": "figma-engine",
+  "purpose": "Core document model: IDs, nodes, tree, properties",
+  "status": "complete",
+  "public_api": [],
+  "dependencies": [],
+  "files": [],
+  "known_issues": [],
+  "decisions": []
+}

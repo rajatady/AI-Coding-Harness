@@ -1,0 +1,11 @@
+[    2513ms] [WARNING] Returning a Promise is the preferred way to send a reply from an onMessage/onMessageExternal listener, as the sendResponse will be removed from the specs (See https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/runtime/onMessage) Error
+    at o (chrome-extension://jmjbgcjbgmcfgbgikmbdioggjlhjegpp/insides/content/content.js:3:378065)
+    at chrome-extension://jmjbgcjbgmcfgbgikmbdioggjlhjegpp/insides/content/content.js:362:300985
+    at chrome-extension://jmjbgcjbgmcfgbgikmbdioggjlhjegpp/insides/content/content.js:3:378108 @ chrome-extension://jmjbgcjbgmcfgbgikmbdioggjlhjegpp/insides/content/content.js:2
+[    2518ms] [ERROR] WebSocket connection to 'ws://localhost:8081/' failed:  @ chrome-extension://fdgfkebogiimcoedlicjlajpkdmockpc/refresh.js:26
+[  241815ms] [ERROR] WebSocket connection to 'ws://localhost:3000/api/ws/default' failed:  @ http://localhost:3000/src/main.ts?t=1771784959401:1386
+[  271300ms] [WARNING] Returning a Promise is the preferred way to send a reply from an onMessage/onMessageExternal listener, as the sendResponse will be removed from the specs (See https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/runtime/onMessage) Error
+    at o (chrome-extension://jmjbgcjbgmcfgbgikmbdioggjlhjegpp/insides/content/content.js:3:378065)
+    at chrome-extension://jmjbgcjbgmcfgbgikmbdioggjlhjegpp/insides/content/content.js:362:300985
+    at chrome-extension://jmjbgcjbgmcfgbgikmbdioggjlhjegpp/insides/content/content.js:3:378108 @ chrome-extension://jmjbgcjbgmcfgbgikmbdioggjlhjegpp/insides/content/content.js:2
+[  271325ms] [ERROR] WebSocket connection to 'ws://localhost:8081/' failed:  @ chrome-extension://fdgfkebogiimcoedlicjlajpkdmockpc/refresh.js:26

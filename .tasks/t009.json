@@ -1,0 +1,14 @@
+{
+  "id": "t009",
+  "title": "Path rasterization with scanline fill",
+  "status": "done",
+  "blocked_by": [],
+  "module": "figma-renderer",
+  "subtasks": [],
+  "acceptance": [
+    "Can render arbitrary bezier paths",
+    "EvenOdd and NonZero fill rules work",
+    "Anti-aliased edges"
+  ],
+  "outcome": "Path rasterization with bezier flattening, scanline fill, winding number for NonZero/EvenOdd. Anti-aliased. All tests pass."
+}
