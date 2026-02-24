@@ -51,6 +51,10 @@ impl<'a> ColorSampler<'a> {
                     stops, center: *center, inv_radius: 1.0 / *radius,
                 })
             }
+            Paint::AngularGradient { .. } | Paint::DiamondGradient { .. } => {
+                // Angular/Diamond gradients handled by Canvas 2D renderer
+                None
+            }
             Paint::Image { .. } => {
                 // Image fills handled by Canvas 2D renderer, not rasterizer
                 None

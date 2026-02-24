@@ -29,7 +29,7 @@ enum InteractionMode {
     Idle,
     /// Dragging one or more selected nodes. `origins` stores (node_id, orig_tx, orig_ty) for each.
     Dragging { origins: Vec<(NodeId, f32, f32)>, start_x: f32, start_y: f32 },
-    Resizing { node_id: NodeId, handle: ResizeHandle, start_x: f32, start_y: f32, orig_w: f32, orig_h: f32 },
+    Resizing { node_id: NodeId, handle: ResizeHandle, start_x: f32, start_y: f32, orig_w: f32, orig_h: f32, orig_tx: f32, orig_ty: f32 },
     /// Rotating a selected node around its center.
     Rotating { node_id: NodeId, center_x: f32, center_y: f32, start_angle: f32, orig_transform: Transform },
     /// Marquee (lasso) selection: drag on empty space to select all nodes within the rectangle.
@@ -43,6 +43,17 @@ enum InteractionMode {
         orig_x: f32,
         orig_y: f32,
     },
+    /// Click-drag shape creation: user drags to define position and size.
+    CreatingShape { shape_type: ShapeCreationType, start_wx: f32, start_wy: f32 },
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum ShapeCreationType {
+    Rectangle,
+    Ellipse,
+    Frame,
+    Star,
+    Text,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -268,6 +279,8 @@ pub struct FigmaApp {
     /// Cached scene items (rebuilt only when tree changes, not on camera move).
     scene_cache: Option<Vec<figma_renderer::scene::RenderItem>>,
     scene_cache_viewport: Option<figma_renderer::scene::AABB>,
+    /// NodeId → scene cache index for O(1) lookups in patch_scene_*.
+    scene_node_index: std::collections::HashMap<NodeId, usize>,
     /// Spatial grid index for top-level artboards.
     /// Maps grid cell (col, row) → list of (scene_index, end_index) for artboards in that cell.
     /// Grid cell size chosen to give O(1) viewport lookups instead of O(100K) iteration.
@@ -319,6 +332,11 @@ pub struct FigmaApp {
     comment_counter: u32,
     /// Prototype interactions — links between nodes for click-through prototypes.
     prototype_links: Vec<PrototypeLink>,
+    /// Pending shape creation type — set by start_creating(), consumed by next mousedown.
+    pending_creation: Option<ShapeCreationType>,
+    /// Text-on-arc params: NodeId → (radius, start_angle, letter_spacing).
+    /// If a text node has an entry here, it renders along a circular arc instead of flat.
+    text_arc_params: std::collections::HashMap<NodeId, (f32, f32, f32)>,
 }
 
 #[wasm_bindgen]
@@ -345,6 +363,7 @@ impl FigmaApp {
             pan_orig_cam_y: 0.0,
             scene_cache: None,
             scene_cache_viewport: None,
+            scene_node_index: std::collections::HashMap::new(),
             spatial_grid: std::collections::HashMap::new(),
             spatial_grid_cell_size: 4000.0,
             last_drawn_count: 0,
@@ -373,6 +392,8 @@ impl FigmaApp {
             comments: Vec::new(),
             comment_counter: 0,
             prototype_links: Vec::new(),
+            pending_creation: None,
+            text_arc_params: std::collections::HashMap::new(),
         }
     }
 
@@ -437,6 +458,18 @@ impl FigmaApp {
         self.scene_cache = None;
         self.scene_cache_viewport = None;
         self.spatial_grid.clear();
+        self.scene_node_index.clear();
+    }
+
+    /// Build NodeId → scene index map for O(1) lookups in patch_scene_*.
+    fn rebuild_scene_node_index(&mut self) {
+        self.scene_node_index.clear();
+        if let Some(items) = self.scene_cache.as_ref() {
+            self.scene_node_index.reserve(items.len());
+            for (i, item) in items.iter().enumerate() {
+                self.scene_node_index.insert(item.node_id, i);
+            }
+        }
     }
 
     /// Mark that only the overlay changed (selection, etc) — re-render without scene rebuild.
@@ -459,6 +492,7 @@ impl FigmaApp {
             );
             let items = figma_renderer::scene::build_scene(&page.tree, &root_id, &full_viewport);
             self.scene_cache = Some(items);
+            self.rebuild_scene_node_index();
         }
         let items = self.scene_cache.as_ref().unwrap();
         let point = Vec2::new(wx, wy);
@@ -565,11 +599,14 @@ impl FigmaApp {
     }
 
     /// Patch a single node's transform/size in the cached scene items.
-    /// O(n) scan but no allocation — much faster than full scene rebuild for 80K items.
+    /// O(1) lookup via scene_node_index, then O(descendants) propagation.
     fn patch_scene_transform(&mut self, node_id: NodeId, new_local_tx: f32, new_local_ty: f32, w: Option<f32>, h: Option<f32>) {
+        let idx = match self.scene_node_index.get(&node_id) {
+            Some(&i) => i,
+            None => return,
+        };
         if let Some(items) = self.scene_cache.as_mut() {
-            for idx in 0..items.len() {
-                if items[idx].node_id == node_id {
+            if idx < items.len() && items[idx].node_id == node_id {
                     let old_world_tx = items[idx].world_transform.tx;
                     let old_world_ty = items[idx].world_transform.ty;
 
@@ -620,13 +657,58 @@ impl FigmaApp {
                         // Spatial grid bounds changed for moved descendants
                         self.spatial_grid.clear();
                     }
-                    return;
                 }
+            }
+        }
+
+    /// Update the full transform matrix of a cached RenderItem in-place.
+    /// Used for rotation changes — avoids full scene rebuild.
+    fn patch_scene_full_transform(&mut self, node_id: NodeId, new_transform: figma_engine::properties::Transform, w: f32, h: f32) {
+        let idx = match self.scene_node_index.get(&node_id) {
+            Some(&i) => i,
+            None => return,
+        };
+        if let Some(items) = self.scene_cache.as_mut() {
+            if idx < items.len() && items[idx].node_id == node_id {
+                // Find parent world transform
+                let mut parent_tx = figma_engine::properties::Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, tx: 0.0, ty: 0.0 };
+                for pi in (0..idx).rev() {
+                    let end = pi + 1 + items[pi].descendant_count;
+                    if end > idx {
+                        parent_tx = items[pi].world_transform;
+                        break;
+                    }
+                }
+                // world = parent * local
+                let wt = figma_engine::properties::Transform {
+                    a: parent_tx.a * new_transform.a + parent_tx.c * new_transform.b,
+                    b: parent_tx.b * new_transform.a + parent_tx.d * new_transform.b,
+                    c: parent_tx.a * new_transform.c + parent_tx.c * new_transform.d,
+                    d: parent_tx.b * new_transform.c + parent_tx.d * new_transform.d,
+                    tx: parent_tx.a * new_transform.tx + parent_tx.c * new_transform.ty + parent_tx.tx,
+                    ty: parent_tx.b * new_transform.tx + parent_tx.d * new_transform.ty + parent_tx.ty,
+                };
+                items[idx].world_transform = wt;
+                // Recompute bounds from transformed corners
+                let corners = [
+                    (wt.tx, wt.ty),
+                    (wt.a * w + wt.tx, wt.b * w + wt.ty),
+                    (wt.c * h + wt.tx, wt.d * h + wt.ty),
+                    (wt.a * w + wt.c * h + wt.tx, wt.b * w + wt.d * h + wt.ty),
+                ];
+                let min_x = corners.iter().map(|c| c.0).fold(f32::INFINITY, f32::min);
+                let min_y = corners.iter().map(|c| c.1).fold(f32::INFINITY, f32::min);
+                let max_x = corners.iter().map(|c| c.0).fold(f32::NEG_INFINITY, f32::max);
+                let max_y = corners.iter().map(|c| c.1).fold(f32::NEG_INFINITY, f32::max);
+                items[idx].world_bounds = AABB::new(
+                    Vec2::new(min_x, min_y),
+                    Vec2::new(max_x, max_y),
+                );
             }
         }
     }
 
-    /// Update the style of a cached RenderItem in-place. O(n) scan.
+    /// Update the style of a cached RenderItem in-place. O(1) via scene_node_index.
     /// Used for fill, stroke, opacity, blend mode changes — avoids full scene rebuild.
     fn patch_scene_style(&mut self, node_id: NodeId) {
         let style = {
@@ -639,12 +721,13 @@ impl FigmaApp {
                 None => return,
             }
         };
+        let idx = match self.scene_node_index.get(&node_id) {
+            Some(&i) => i,
+            None => return,
+        };
         if let Some(items) = self.scene_cache.as_mut() {
-            for item in items.iter_mut() {
-                if item.node_id == node_id {
-                    item.style = style;
-                    return;
-                }
+            if idx < items.len() && items[idx].node_id == node_id {
+                items[idx].style = style;
             }
         }
     }
@@ -675,15 +758,15 @@ impl FigmaApp {
             };
             (shape, node.width, node.height, node.transform.tx, node.transform.ty)
         };
+        let idx = match self.scene_node_index.get(&node_id) {
+            Some(&i) => i,
+            None => return,
+        };
         if let Some(items) = self.scene_cache.as_mut() {
-            for item in items.iter_mut() {
-                if item.node_id == node_id {
-                    item.shape = shape;
-                    // Update bounds
-                    item.world_bounds = AABB::from_size(tx, ty, w, h);
-                    self.needs_render = true;
-                    return;
-                }
+            if idx < items.len() && items[idx].node_id == node_id {
+                items[idx].shape = shape;
+                items[idx].world_bounds = AABB::from_size(tx, ty, w, h);
+                self.needs_render = true;
             }
         }
     }
@@ -707,32 +790,34 @@ impl FigmaApp {
                 return;
             }
         };
+        let idx = match self.scene_node_index.get(&node_id) {
+            Some(&i) => i,
+            None => return,
+        };
         if let Some(items) = self.scene_cache.as_mut() {
-            for item in items.iter_mut() {
-                if item.node_id == node_id {
-                    item.shape = figma_renderer::scene::RenderShape::Text {
-                        runs, width, height, align, vertical_align,
-                    };
-                    item.style = style;
-                    self.needs_render = true;
-                    return;
-                }
+            if idx < items.len() && items[idx].node_id == node_id {
+                items[idx].shape = figma_renderer::scene::RenderShape::Text {
+                    runs, width, height, align, vertical_align,
+                };
+                items[idx].style = style;
+                self.needs_render = true;
             }
         }
     }
 
-    /// Update corner radii in a cached RenderItem's shape in-place. O(n) scan.
+    /// Update corner radii in a cached RenderItem's shape in-place. O(1) via scene_node_index.
     /// Corner radii only affect RenderShape::Rect — avoids full scene rebuild.
     fn patch_scene_corner_radii(&mut self, node_id: NodeId, radii: figma_engine::node::CornerRadii) {
+        let idx = match self.scene_node_index.get(&node_id) {
+            Some(&i) => i,
+            None => return,
+        };
         if let Some(items) = self.scene_cache.as_mut() {
-            for item in items.iter_mut() {
-                if item.node_id == node_id {
-                    if let figma_renderer::scene::RenderShape::Rect { ref mut corner_radii, .. } = item.shape {
-                        *corner_radii = radii;
-                    }
-                    self.needs_render = true;
-                    return;
+            if idx < items.len() && items[idx].node_id == node_id {
+                if let figma_renderer::scene::RenderShape::Rect { ref mut corner_radii, .. } = items[idx].shape {
+                    *corner_radii = radii;
                 }
+                self.needs_render = true;
             }
         }
     }
@@ -746,14 +831,8 @@ impl FigmaApp {
             None => return, // No cache to update
         };
 
-        // Find parent's position and compute insert index
-        let mut parent_idx = None;
-        for (idx, item) in items.iter().enumerate() {
-            if item.node_id == parent_id {
-                parent_idx = Some(idx);
-                break;
-            }
-        }
+        // Find parent's position via O(1) index lookup
+        let parent_idx = self.scene_node_index.get(&parent_id).copied();
         let parent_idx = match parent_idx {
             Some(idx) => idx,
             None => {
@@ -838,6 +917,14 @@ impl FigmaApp {
             }
         }
 
+        // Update scene_node_index: shift indices >= insert_at, add new entry
+        for val in self.scene_node_index.values_mut() {
+            if *val >= insert_at {
+                *val += 1;
+            }
+        }
+        self.scene_node_index.insert(node.id, insert_at);
+
         // Incrementally update spatial grid: shift indices >= insert_at by +1, add new item
         if !self.spatial_grid.is_empty() {
             // Shift existing entries
@@ -877,15 +964,8 @@ impl FigmaApp {
             None => return,
         };
 
-        // Search backwards — recently added nodes are near the end
-        let mut remove_idx = None;
-        for idx in (0..items.len()).rev() {
-            if items[idx].node_id == node_id {
-                remove_idx = Some(idx);
-                break;
-            }
-        }
-        let remove_idx = match remove_idx {
+        // O(1) lookup via scene_node_index
+        let remove_idx = match self.scene_node_index.get(&node_id).copied() {
             Some(idx) => idx,
             None => return,
         };
@@ -901,6 +981,25 @@ impl FigmaApp {
             let end = j + 1 + items[j].descendant_count;
             if end >= remove_idx {
                 items[j].descendant_count -= removed;
+            }
+        }
+
+        // Update scene_node_index: remove entry and shift indices down
+        self.scene_node_index.remove(&node_id);
+        // Remove descendant entries too
+        if desc_count > 0 {
+            // Collect node_ids of removed descendants (they're gone from items, get from index)
+            let to_remove: Vec<NodeId> = self.scene_node_index.iter()
+                .filter(|(_, &v)| v >= remove_idx && v < remove_idx + removed)
+                .map(|(k, _)| *k)
+                .collect();
+            for k in to_remove {
+                self.scene_node_index.remove(&k);
+            }
+        }
+        for val in self.scene_node_index.values_mut() {
+            if *val >= remove_idx {
+                *val -= removed;
             }
         }
 
@@ -1354,6 +1453,83 @@ impl FigmaApp {
         vec![id.0.counter as u32, id.0.client_id]
     }
 
+    /// Add a rectangle with an image fill (URL-based, loaded by renderer).
+    /// `path` is relative to /imports/ (e.g. "starbucks.png").
+    /// `scale_mode`: "fill", "fit", "tile", "stretch".
+    pub fn add_image_fill(
+        &mut self, name: &str, x: f32, y: f32, width: f32, height: f32,
+        path: &str, scale_mode: &str, opacity: f32,
+    ) -> Vec<u32> {
+        let sm = match scale_mode {
+            "fit" => ImageScaleMode::Fit,
+            "tile" => ImageScaleMode::Tile,
+            "stretch" => ImageScaleMode::Stretch,
+            _ => ImageScaleMode::Fill,
+        };
+
+        let id = self.document.next_id();
+        let mut node = Node::rectangle(id, name, width, height);
+        node.transform = Transform::translate(x, y);
+        node.style.fills.clear();
+        node.style.fills.push(Paint::Image {
+            path: path.to_string(),
+            scale_mode: sm,
+            opacity: opacity.clamp(0.0, 1.0),
+        });
+
+        let parent_id = self.effective_parent();
+        let op_id = self.document.clock.next_op_id();
+        self.pending_ops.push(Operation {
+            id: op_id,
+            kind: OpKind::InsertNode {
+                node: node.clone(),
+                parent_id,
+                position: FractionalIndex::end(),
+            },
+        });
+        let node_for_undo = node.clone();
+        let node_for_scene = node.clone();
+        self.document.add_node(self.current_page, node, parent_id, usize::MAX).expect("insert failed");
+        self.undo_stack.push(UndoAction::AddNode { node: node_for_undo, parent_id });
+        self.redo_stack.clear();
+        self.has_image_fills = true;
+        self.scene_insert_leaf(&node_for_scene, parent_id);
+        self.needs_render = true;
+        vec![id.0.counter as u32, id.0.client_id]
+    }
+
+    /// Set image fill on an existing node (replace all fills with an image fill).
+    pub fn set_image_fill(
+        &mut self, counter: u32, client_id: u32,
+        path: &str, scale_mode: &str, opacity: f32,
+    ) -> bool {
+        let node_id = NodeId::new(counter as u64, client_id);
+        let sm = match scale_mode {
+            "fit" => ImageScaleMode::Fit,
+            "tile" => ImageScaleMode::Tile,
+            "stretch" => ImageScaleMode::Stretch,
+            _ => ImageScaleMode::Fill,
+        };
+        let page = match self.document.page_mut(self.current_page) {
+            Some(p) => p,
+            None => return false,
+        };
+        let node = match page.tree.get_mut(&node_id) {
+            Some(n) => n,
+            None => return false,
+        };
+        node.style.fills.clear();
+        node.style.fills.push(Paint::Image {
+            path: path.to_string(),
+            scale_mode: sm,
+            opacity: opacity.clamp(0.0, 1.0),
+        });
+        self.has_image_fills = true;
+        self.patch_scene_style(node_id);
+        self.needs_render = true;
+        true
+    }
+
     /// Add a vector shape from flat path data.
     /// Format: each command is [type, ...args]
     ///   0, x, y           = MoveTo
@@ -1430,6 +1606,82 @@ impl FigmaApp {
         vec![id.0.counter as u32, id.0.client_id]
     }
 
+    /// Add a star/polygon. `points` = number of outer points (3=triangle, 5=star, 6=hexagon).
+    /// `inner_ratio` = inner radius / outer radius (0.0..1.0). Use 1.0 for regular polygon.
+    pub fn add_star(
+        &mut self, name: &str, x: f32, y: f32, width: f32, height: f32,
+        r: f32, g: f32, b: f32, a: f32,
+        points: u32, inner_ratio: f32,
+    ) -> Vec<u32> {
+        use figma_engine::node::{PathCommand, VectorPath};
+
+        let cx = width / 2.0;
+        let cy = height / 2.0;
+        let rx = width / 2.0;
+        let ry = height / 2.0;
+        let inner_rx = rx * inner_ratio.clamp(0.01, 1.0);
+        let inner_ry = ry * inner_ratio.clamp(0.01, 1.0);
+        let n = points.max(3) as usize;
+        let is_polygon = (inner_ratio - 1.0).abs() < 0.01;
+
+        let mut commands = Vec::new();
+        let total_verts = if is_polygon { n } else { n * 2 };
+        let angle_step = std::f32::consts::TAU / total_verts as f32;
+        let start_angle = -std::f32::consts::FRAC_PI_2; // point up
+
+        for i in 0..total_verts {
+            let angle = start_angle + angle_step * i as f32;
+            let (is_outer, r_x, r_y) = if is_polygon {
+                (true, rx, ry)
+            } else if i % 2 == 0 {
+                (true, rx, ry)
+            } else {
+                (false, inner_rx, inner_ry)
+            };
+            let _ = is_outer;
+            let px = cx + r_x * angle.cos();
+            let py = cy + r_y * angle.sin();
+            if i == 0 {
+                commands.push(PathCommand::MoveTo(Vec2::new(px, py)));
+            } else {
+                commands.push(PathCommand::LineTo(Vec2::new(px, py)));
+            }
+        }
+        commands.push(PathCommand::Close);
+
+        let id = self.document.next_id();
+        let mut node = Node::rectangle(id, name, width, height);
+        node.kind = NodeKind::Vector {
+            paths: vec![VectorPath {
+                commands,
+                fill_rule: FillRule::NonZero,
+            }],
+        };
+        node.transform = Transform::translate(x, y);
+        node.style.fills.push(Paint::Solid(Color::new(r, g, b, a)));
+
+        let parent_id = self.effective_parent();
+        let op_id = self.document.clock.next_op_id();
+        let op = Operation {
+            id: op_id,
+            kind: OpKind::InsertNode {
+                node: node.clone(),
+                parent_id,
+                position: FractionalIndex::end(),
+            },
+        };
+        self.pending_ops.push(op);
+
+        let node_for_undo = node.clone();
+        let node_for_scene = node.clone();
+        self.document.add_node(self.current_page, node, parent_id, usize::MAX).expect("insert failed");
+        self.undo_stack.push(UndoAction::AddNode { node: node_for_undo, parent_id });
+        self.redo_stack.clear();
+        self.scene_insert_leaf(&node_for_scene, parent_id);
+        self.needs_render = true;
+        vec![id.0.counter as u32, id.0.client_id]
+    }
+
     // ─── Pen tool ──────────────────────────────────────────
 
     /// Enter pen drawing mode.
@@ -1452,6 +1704,48 @@ impl FigmaApp {
         self.pen_anchors.clear();
         self.pen_dragging_handle = None;
         self.mark_selection_dirty();
+    }
+
+    // ── Click-drag shape creation ─────────────────────────────────────
+    /// Start shape creation mode. Next mousedown+drag will create the shape.
+    /// shape_type: "rect", "ellipse", "frame", "star", "text"
+    pub fn start_creating(&mut self, shape_type: &str) {
+        self.pending_creation = match shape_type {
+            "rect" | "rectangle" => Some(ShapeCreationType::Rectangle),
+            "ellipse" | "circle" => Some(ShapeCreationType::Ellipse),
+            "frame" => Some(ShapeCreationType::Frame),
+            "star" => Some(ShapeCreationType::Star),
+            "text" => Some(ShapeCreationType::Text),
+            _ => None,
+        };
+    }
+
+    /// Whether we're in creation mode (waiting for mousedown).
+    pub fn is_creating(&self) -> bool {
+        self.pending_creation.is_some() || matches!(self.mode, InteractionMode::CreatingShape { .. })
+    }
+
+    /// Get creation preview rectangle [x, y, w, h] in world coords during drag.
+    /// Returns empty vec if not currently dragging a creation.
+    pub fn get_creation_preview(&self) -> Vec<f32> {
+        if let InteractionMode::CreatingShape { start_wx, start_wy, .. } = self.mode {
+            let (cx, cy) = (self.pen_cursor.x, self.pen_cursor.y); // reuse pen_cursor for current mouse
+            let x = start_wx.min(cx);
+            let y = start_wy.min(cy);
+            let w = (cx - start_wx).abs().max(1.0);
+            let h = (cy - start_wy).abs().max(1.0);
+            vec![x, y, w, h]
+        } else {
+            vec![]
+        }
+    }
+
+    /// Cancel creation mode.
+    pub fn cancel_creating(&mut self) {
+        self.pending_creation = None;
+        if matches!(self.mode, InteractionMode::CreatingShape { .. }) {
+            self.mode = InteractionMode::Idle;
+        }
     }
 
     /// Mouse down in pen mode (screen coords). Adds an anchor.
@@ -1864,6 +2158,15 @@ impl FigmaApp {
         let (wx, wy) = self.screen_to_world(sx, sy);
         let now = js_sys::Date::now();
 
+        // Click-drag shape creation: if pending, start drag
+        if let Some(shape_type) = self.pending_creation.take() {
+            self.pen_cursor = Vec2::new(wx, wy); // reuse for current pos tracking
+            self.mode = InteractionMode::CreatingShape { shape_type, start_wx: wx, start_wy: wy };
+            self.selected.clear();
+            self.needs_render = true;
+            return false;
+        }
+
         // Check rotation zone BEFORE hit testing — rotation zone is OUTSIDE node bounds
         if self.selected.len() == 1 && self.check_rotation_zone(wx, wy) {
             let node_id = self.selected[0];
@@ -1882,6 +2185,23 @@ impl FigmaApp {
                     };
                     return true;
                 }
+            }
+        }
+
+        // Check resize handles BEFORE hit-testing — handles must take priority
+        // even when another node is on top at the corner position.
+        if !self.selected.is_empty() && !shift {
+            if let Some(handle) = self.check_resize_handle(wx, wy) {
+                let sel_id = self.selected[0];
+                let page = self.document.page(self.current_page).unwrap();
+                let node = page.tree.get(&sel_id).unwrap();
+                self.mode = InteractionMode::Resizing {
+                    node_id: sel_id, handle,
+                    start_x: wx, start_y: wy,
+                    orig_w: node.width, orig_h: node.height,
+                    orig_tx: node.transform.tx, orig_ty: node.transform.ty,
+                };
+                return true;
             }
         }
 
@@ -1961,19 +2281,7 @@ impl FigmaApp {
             }
 
             let page = self.document.page(self.current_page).unwrap();
-            // Check if clicking on a resize handle of the selected node
-            if self.selected.contains(&node_id) && !shift {
-                if let Some(handle) = self.check_resize_handle(wx, wy) {
-                    let node = page.tree.get(&node_id).unwrap();
-                    self.mode = InteractionMode::Resizing {
-                        node_id, handle,
-                        start_x: wx, start_y: wy,
-                        orig_w: node.width, orig_h: node.height,
-                    };
-                    return true;
-                }
-                // Rotation zone is handled before hit_test (outside node bounds)
-            }
+            // Note: resize handles are checked BEFORE hit_test (above)
 
             if shift {
                 // Toggle: remove if already selected, add otherwise
@@ -2046,7 +2354,7 @@ impl FigmaApp {
                 }
                 self.needs_render = true;
             }
-            InteractionMode::Resizing { node_id, handle, start_x, start_y, orig_w, orig_h } => {
+            InteractionMode::Resizing { node_id, handle, start_x, start_y, orig_w, orig_h, orig_tx, orig_ty } => {
                 let dx = x - start_x;
                 let dy = y - start_y;
                 if let Some(page) = self.document.page_mut(self.current_page) {
@@ -2065,26 +2373,26 @@ impl FigmaApp {
                             ResizeHandle::TopRight => {
                                 node.width = (orig_w + dx).max(1.0);
                                 node.height = (orig_h - dy).max(1.0);
-                                node.transform.ty += dy;
+                                node.transform.ty = orig_ty + dy;
                             }
                             ResizeHandle::BottomLeft => {
                                 node.width = (orig_w - dx).max(1.0);
                                 node.height = (orig_h + dy).max(1.0);
-                                node.transform.tx += dx;
+                                node.transform.tx = orig_tx + dx;
                             }
                             ResizeHandle::TopLeft => {
                                 node.width = (orig_w - dx).max(1.0);
                                 node.height = (orig_h - dy).max(1.0);
-                                node.transform.tx += dx;
-                                node.transform.ty += dy;
+                                node.transform.tx = orig_tx + dx;
+                                node.transform.ty = orig_ty + dy;
                             }
                             ResizeHandle::Top => {
                                 node.height = (orig_h - dy).max(1.0);
-                                node.transform.ty += dy;
+                                node.transform.ty = orig_ty + dy;
                             }
                             ResizeHandle::Left => {
                                 node.width = (orig_w - dx).max(1.0);
-                                node.transform.tx += dx;
+                                node.transform.tx = orig_tx + dx;
                             }
                         }
                         // Snap position and size to grid
@@ -2120,13 +2428,13 @@ impl FigmaApp {
                         ty: orig_t.ty,
                     }
                 };
-                if let Some(page) = self.document.page_mut(self.current_page) {
+                let (w, h) = if let Some(page) = self.document.page_mut(self.current_page) {
                     if let Some(node) = page.tree.get_mut(&node_id) {
                         node.transform = new_transform;
-                    }
-                }
-                // Full scene rebuild needed for rotated transforms
-                self.mark_dirty();
+                        (node.width, node.height)
+                    } else { (0.0, 0.0) }
+                } else { (0.0, 0.0) };
+                self.patch_scene_full_transform(node_id, new_transform, w, h);
                 self.needs_render = true;
             }
             InteractionMode::EditingVector { vector_id, point_index, handle_type, start_x, start_y, orig_x, orig_y } => {
@@ -2210,6 +2518,11 @@ impl FigmaApp {
                 }
                 self.needs_render = true;
             }
+            InteractionMode::CreatingShape { .. } => {
+                // Update preview position (reuse pen_cursor for tracking)
+                self.pen_cursor = Vec2::new(x, y);
+                self.needs_render = true;
+            }
             InteractionMode::Idle => {}
         }
     }
@@ -2286,15 +2599,9 @@ impl FigmaApp {
                     }
                 }
             }
-            InteractionMode::Resizing { node_id, start_x: _, start_y: _, orig_w, orig_h, .. } => {
-                // Push undo with original dimensions
-                let old_tx = self.document.page(self.current_page)
-                    .and_then(|p| p.tree.get(&node_id))
-                    .map(|n| n.transform.tx).unwrap_or(0.0);
-                let old_ty = self.document.page(self.current_page)
-                    .and_then(|p| p.tree.get(&node_id))
-                    .map(|n| n.transform.ty).unwrap_or(0.0);
-                self.undo_stack.push(UndoAction::ResizeNode { node_id, tx: old_tx, ty: old_ty, w: orig_w, h: orig_h });
+            InteractionMode::Resizing { node_id, orig_w, orig_h, orig_tx, orig_ty, .. } => {
+                // Push undo with original dimensions and position
+                self.undo_stack.push(UndoAction::ResizeNode { node_id, tx: orig_tx, ty: orig_ty, w: orig_w, h: orig_h });
                 self.redo_stack.clear();
                 // Capture current values for CRDT ops
                 let props = self.document.page(self.current_page)
@@ -2360,6 +2667,26 @@ impl FigmaApp {
                 // Selection was already updated live during mouse_move.
                 // Just finalize by switching to Idle.
                 self.mark_selection_dirty();
+            }
+            InteractionMode::CreatingShape { shape_type, start_wx, start_wy } => {
+                let end = self.pen_cursor;
+                let x = start_wx.min(end.x);
+                let y = start_wy.min(end.y);
+                let w = (end.x - start_wx).abs().max(2.0);
+                let h = (end.y - start_wy).abs().max(2.0);
+                // Create the shape at the dragged rectangle and select it
+                let id_parts = match shape_type {
+                    ShapeCreationType::Rectangle => self.add_rectangle("Rectangle", x, y, w, h, 0.75, 0.75, 0.75, 1.0),
+                    ShapeCreationType::Ellipse => self.add_ellipse("Ellipse", x, y, w, h, 0.75, 0.75, 0.75, 1.0),
+                    ShapeCreationType::Frame => self.add_frame("Frame", x, y, w, h, 1.0, 1.0, 1.0, 1.0),
+                    ShapeCreationType::Star => self.add_star("Star", x, y, w, h, 0.75, 0.75, 0.75, 1.0, 5, 0.5),
+                    ShapeCreationType::Text => self.add_text("Text", "Text", x, y, 16.0, 1.0, 1.0, 1.0, 1.0),
+                };
+                if id_parts.len() == 2 {
+                    let node_id = NodeId::new(id_parts[0] as u64, id_parts[1]);
+                    self.selected = vec![node_id];
+                    self.mark_selection_dirty();
+                }
             }
             InteractionMode::Idle => {}
         }
@@ -3098,6 +3425,7 @@ impl FigmaApp {
                 Vec2::new(f32::INFINITY, f32::INFINITY),
             );
             self.scene_cache = Some(figma_renderer::scene::build_scene(&page.tree, &root_id, &full_viewport));
+            self.rebuild_scene_node_index();
         }
         let items = self.scene_cache.as_ref().unwrap();
         if items.is_empty() {
@@ -3169,6 +3497,7 @@ impl FigmaApp {
             );
             let items = figma_renderer::scene::build_scene(&page.tree, &root_id, &full_viewport);
             self.scene_cache = Some(items);
+            self.rebuild_scene_node_index();
             self.scene_cache.as_ref().unwrap()
         } else {
             self.scene_cache.as_ref().unwrap()
@@ -3235,6 +3564,7 @@ impl FigmaApp {
             let items = figma_renderer::scene::build_scene(&page.tree, &root_id, &full_viewport);
             self.spatial_grid.clear();
             self.scene_cache = Some(items);
+            self.rebuild_scene_node_index();
         }
 
         // Rebuild spatial grid if cleared (after incremental scene updates)
@@ -3269,6 +3599,7 @@ impl FigmaApp {
             width as f64, height as f64,
             self.cam_x as f64, self.cam_y as f64, self.cam_zoom as f64,
             dpr as f64,
+            &self.text_arc_params,
         );
 
         // Draw selection overlay via Canvas 2D
@@ -3473,6 +3804,7 @@ impl FigmaApp {
             );
             let items = figma_renderer::scene::build_scene(&page.tree, &root_id, &full_viewport);
             self.scene_cache = Some(items);
+            self.rebuild_scene_node_index();
         }
         let items = self.scene_cache.as_ref().unwrap();
 
@@ -3508,20 +3840,26 @@ impl FigmaApp {
 
             if on_screen {
                 for fill in &item.style.fills {
-                    if let Paint::Image { path, opacity, .. } = fill {
+                    if let Paint::Image { path, opacity, scale_mode } = fill {
                         let sw = sx_max - sx_min;
                         let sh = sy_max - sy_min;
                         let escaped_path = path.replace('"', "\\\"");
+                        let mode_str = match scale_mode {
+                            ImageScaleMode::Fill => "fill",
+                            ImageScaleMode::Fit => "fit",
+                            ImageScaleMode::Tile => "tile",
+                            ImageScaleMode::Stretch => "stretch",
+                        };
                         if let Some(clip) = Self::intersect_clips(&clip_stack) {
                             entries.push(format!(
-                                "[\"{}\",{},{},{},{},{},{},{},{},{}]",
+                                "[\"{}\",{},{},{},{},{},{},{},{},{},\"{}\"]",
                                 escaped_path, sx_min, sy_min, sw, sh, opacity,
-                                clip[0], clip[1], clip[2], clip[3]
+                                clip[0], clip[1], clip[2], clip[3], mode_str
                             ));
                         } else {
                             entries.push(format!(
-                                "[\"{}\",{},{},{},{},{},null,null,null,null]",
-                                escaped_path, sx_min, sy_min, sw, sh, opacity
+                                "[\"{}\",{},{},{},{},{},null,null,null,null,\"{}\"]",
+                                escaped_path, sx_min, sy_min, sw, sh, opacity, mode_str
                             ));
                         }
                     }
@@ -3859,14 +4197,26 @@ impl FigmaApp {
             NodeKind::Image { .. } => "image",
         };
 
-        let (text_content, font_size, letter_spacing, line_height) = if let NodeKind::Text { runs, .. } = &node.kind {
+        let (text_content, font_size, font_family, font_weight, letter_spacing, line_height, text_decoration, text_vertical_align) = if let NodeKind::Text { runs, vertical_align, .. } = &node.kind {
             let text = runs.iter().map(|r| r.text.as_str()).collect::<Vec<_>>().join("");
             let size = runs.first().map(|r| r.font_size).unwrap_or(24.0);
+            let family = runs.first().map(|r| r.font_family.as_str()).unwrap_or("Inter");
+            let weight = runs.first().map(|r| r.font_weight).unwrap_or(400);
             let ls = runs.first().map(|r| r.letter_spacing).unwrap_or(0.0);
             let lh = runs.first().and_then(|r| r.line_height).unwrap_or(0.0);
-            (text, size, ls, lh)
+            let dec = runs.first().map(|r| match r.decoration {
+                figma_engine::node::TextDecoration::None => "none",
+                figma_engine::node::TextDecoration::Underline => "underline",
+                figma_engine::node::TextDecoration::Strikethrough => "strikethrough",
+            }).unwrap_or("none");
+            let va = match vertical_align {
+                figma_engine::node::TextVerticalAlign::Top => "top",
+                figma_engine::node::TextVerticalAlign::Center => "center",
+                figma_engine::node::TextVerticalAlign::Bottom => "bottom",
+            };
+            (text, size, family, weight, ls, lh, dec, va)
         } else {
-            (String::new(), 0.0, 0.0, 0.0)
+            (String::new(), 0.0, "Inter", 400u16, 0.0, 0.0, "none", "top")
         };
 
         // Escape quotes in text content and name for JSON safety
@@ -3945,18 +4295,28 @@ impl FigmaApp {
             String::new()
         };
 
+        // Stroke alignment
+        let stroke_align_str = match node.style.stroke_align {
+            figma_engine::properties::StrokeAlign::Inside => "inside",
+            figma_engine::properties::StrokeAlign::Center => "center",
+            figma_engine::properties::StrokeAlign::Outside => "outside",
+        };
+        let stroke_align_json = format!(r#","strokeAlign":"{}""#, stroke_align_str);
+
         // Text typography properties
-        let typography_json = if letter_spacing.abs() > 0.01 || line_height > 0.0 {
+        let typography_json = {
+            let ff = format!(r#","fontFamily":"{}""#, font_family);
+            let fw = if font_weight != 400 { format!(r#","fontWeight":{}"#, font_weight) } else { String::new() };
             let ls = if letter_spacing.abs() > 0.01 { format!(r#","letterSpacing":{:.1}"#, letter_spacing) } else { String::new() };
             let lh = if line_height > 0.0 { format!(r#","lineHeight":{:.1}"#, line_height) } else { String::new() };
-            format!("{}{}", ls, lh)
-        } else {
-            String::new()
+            let dec = if text_decoration != "none" { format!(r#","textDecoration":"{}""#, text_decoration) } else { String::new() };
+            let va = if text_vertical_align != "top" { format!(r#","textVerticalAlign":"{}""#, text_vertical_align) } else { String::new() };
+            format!("{}{}{}{}{}{}", ff, fw, ls, lh, dec, va)
         };
 
         format!(
-            r#"{{"name":"{}","x":{:.1},"y":{:.1},"width":{:.1},"height":{:.1},"fill":"{}","type":"{}","text":"{}","fontSize":{:.1},"opacity":{:.2},"blendMode":"{}","stroke":"{}","strokeWeight":{:.1},"constraintH":"{}","constraintV":"{}"{}{}{}{}{}}}"#,
-            escaped_name, node.transform.tx, node.transform.ty, node.width, node.height, fill_color, node_type, escaped_text, font_size, node.style.opacity, blend_str, stroke_color, stroke_weight, ch_str, cv_str, auto_layout_json, mask_json, component_json, rotation_json, typography_json
+            r#"{{"name":"{}","x":{:.1},"y":{:.1},"width":{:.1},"height":{:.1},"fill":"{}","type":"{}","text":"{}","fontSize":{:.1},"opacity":{:.2},"blendMode":"{}","stroke":"{}","strokeWeight":{:.1},"constraintH":"{}","constraintV":"{}"{}{}{}{}{}{}}}"#,
+            escaped_name, node.transform.tx, node.transform.ty, node.width, node.height, fill_color, node_type, escaped_text, font_size, node.style.opacity, blend_str, stroke_color, stroke_weight, ch_str, cv_str, auto_layout_json, mask_json, component_json, rotation_json, stroke_align_json, typography_json
         )
     }
 
@@ -4286,7 +4646,10 @@ impl FigmaApp {
         node.transform.c = -sy * sin;
         node.transform.d = sy * cos;
 
-        self.mark_dirty();
+        let new_transform = node.transform;
+        let w = node.width;
+        let h = node.height;
+        self.patch_scene_full_transform(node_id, new_transform, w, h);
         self.needs_render = true;
         true
     }
@@ -4433,6 +4796,62 @@ impl FigmaApp {
         }
     }
 
+    /// Set font family on a text node (e.g. "Inter", "Roboto", "Poppins").
+    pub fn set_node_font_family(&mut self, counter: u32, client_id: u32, family: &str) -> bool {
+        let node_id = NodeId(figma_engine::id::LogicalClock { counter: counter as u64, client_id });
+        let page = match self.document.page_mut(self.current_page) {
+            Some(p) => p,
+            None => return false,
+        };
+        let node = match page.tree.get_mut(&node_id) {
+            Some(n) => n,
+            None => return false,
+        };
+        if let NodeKind::Text { ref mut runs, .. } = node.kind {
+            let old_runs = runs.clone();
+            self.undo_stack.push(UndoAction::ChangeText {
+                node_id, runs: old_runs, width: node.width, height: node.height,
+            });
+            self.redo_stack.clear();
+            for run in runs.iter_mut() {
+                run.font_family = family.to_string();
+            }
+            self.patch_scene_text(node_id);
+            self.needs_render = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Set font weight on a text node (300=Light, 400=Regular, 500=Medium, 600=Semibold, 700=Bold).
+    pub fn set_node_font_weight(&mut self, counter: u32, client_id: u32, weight: u16) -> bool {
+        let node_id = NodeId(figma_engine::id::LogicalClock { counter: counter as u64, client_id });
+        let page = match self.document.page_mut(self.current_page) {
+            Some(p) => p,
+            None => return false,
+        };
+        let node = match page.tree.get_mut(&node_id) {
+            Some(n) => n,
+            None => return false,
+        };
+        if let NodeKind::Text { ref mut runs, .. } = node.kind {
+            let old_runs = runs.clone();
+            self.undo_stack.push(UndoAction::ChangeText {
+                node_id, runs: old_runs, width: node.width, height: node.height,
+            });
+            self.redo_stack.clear();
+            for run in runs.iter_mut() {
+                run.font_weight = weight;
+            }
+            self.patch_scene_text(node_id);
+            self.needs_render = true;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Set letter spacing on a text node (in pixels).
     pub fn set_letter_spacing(&mut self, counter: u32, client_id: u32, spacing: f32) -> bool {
         let node_id = NodeId(figma_engine::id::LogicalClock { counter: counter as u64, client_id });
@@ -4487,6 +4906,113 @@ impl FigmaApp {
         } else {
             false
         }
+    }
+
+    /// Set text decoration: "none", "underline", or "strikethrough".
+    pub fn set_text_decoration(&mut self, counter: u32, client_id: u32, decoration: &str) -> bool {
+        use figma_engine::node::TextDecoration;
+        let dec = match decoration {
+            "underline" => TextDecoration::Underline,
+            "strikethrough" => TextDecoration::Strikethrough,
+            _ => TextDecoration::None,
+        };
+        let node_id = NodeId(figma_engine::id::LogicalClock { counter: counter as u64, client_id });
+        let page = match self.document.page_mut(self.current_page) {
+            Some(p) => p,
+            None => return false,
+        };
+        let node = match page.tree.get_mut(&node_id) {
+            Some(n) => n,
+            None => return false,
+        };
+        if let NodeKind::Text { ref mut runs, .. } = node.kind {
+            let old_runs = runs.clone();
+            self.undo_stack.push(UndoAction::ChangeText {
+                node_id, runs: old_runs, width: node.width, height: node.height,
+            });
+            self.redo_stack.clear();
+            for run in runs.iter_mut() {
+                run.decoration = dec;
+            }
+            self.patch_scene_text(node_id);
+            self.needs_render = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Set text vertical alignment: "top", "center", or "bottom".
+    pub fn set_text_vertical_align(&mut self, counter: u32, client_id: u32, align: &str) -> bool {
+        use figma_engine::node::TextVerticalAlign;
+        let va = match align {
+            "center" => TextVerticalAlign::Center,
+            "bottom" => TextVerticalAlign::Bottom,
+            _ => TextVerticalAlign::Top,
+        };
+        let node_id = NodeId(figma_engine::id::LogicalClock { counter: counter as u64, client_id });
+        let page = match self.document.page_mut(self.current_page) {
+            Some(p) => p,
+            None => return false,
+        };
+        let node = match page.tree.get_mut(&node_id) {
+            Some(n) => n,
+            None => return false,
+        };
+        if let NodeKind::Text { ref mut vertical_align, .. } = node.kind {
+            *vertical_align = va;
+            self.patch_scene_text(node_id);
+            self.needs_render = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Set text-on-arc parameters. radius=0 removes arc rendering.
+    /// start_angle is in radians (−PI/2 = top of circle, PI/2 = bottom).
+    pub fn set_text_arc(&mut self, counter: u32, client_id: u32, radius: f32, start_angle: f32, letter_spacing: f32) {
+        let node_id = NodeId(figma_engine::id::LogicalClock { counter: counter as u64, client_id });
+        if radius > 0.0 {
+            self.text_arc_params.insert(node_id, (radius, start_angle, letter_spacing));
+        } else {
+            self.text_arc_params.remove(&node_id);
+        }
+        self.needs_render = true;
+    }
+
+    /// Get text-on-arc parameters for a node. Returns [radius, start_angle, letter_spacing] or empty.
+    pub fn get_text_arc(&self, counter: u32, client_id: u32) -> Vec<f32> {
+        let node_id = NodeId(figma_engine::id::LogicalClock { counter: counter as u64, client_id });
+        match self.text_arc_params.get(&node_id) {
+            Some(&(r, a, s)) => vec![r, a, s],
+            None => vec![],
+        }
+    }
+
+    /// Set stroke alignment: "inside", "center", or "outside".
+    pub fn set_stroke_align(&mut self, counter: u32, client_id: u32, align: &str) -> bool {
+        let sa = match align {
+            "inside" => StrokeAlign::Inside,
+            "outside" => StrokeAlign::Outside,
+            _ => StrokeAlign::Center,
+        };
+        let node_id = NodeId(figma_engine::id::LogicalClock { counter: counter as u64, client_id });
+        let page = match self.document.page_mut(self.current_page) {
+            Some(p) => p,
+            None => return false,
+        };
+        let node = match page.tree.get_mut(&node_id) {
+            Some(n) => n,
+            None => return false,
+        };
+        let old_fills = node.style.fills.clone();
+        self.undo_stack.push(UndoAction::ChangeFill { node_id, fills: old_fills });
+        self.redo_stack.clear();
+        node.style.stroke_align = sa;
+        self.mark_dirty();
+        self.needs_render = true;
+        true
     }
 
     /// Set corner radius on a rectangle or frame node.

@@ -1484,6 +1484,136 @@ async function main() {
             return true;
         });
 
+        // Section: Text Decoration
+        // ═══════════════════════════════════════════════════════════
+
+        await t('decoration.underline', () => {
+            const app = window._app;
+            const tId = app.add_text('dec_test', 'UNDERLINE', -28000, -28000, 16, 1, 1, 1, 1);
+            app.set_text_decoration(tId[0], tId[1], 'underline');
+            const info = JSON.parse(app.get_node_info(tId[0], tId[1]));
+            if (info.textDecoration !== 'underline') return `expected underline, got ${info.textDecoration}`;
+            return true;
+        });
+
+        await t('decoration.strikethrough', () => {
+            const app = window._app;
+            const tId = app.add_text('dec_test2', 'STRIKE', -28200, -28000, 16, 1, 1, 1, 1);
+            app.set_text_decoration(tId[0], tId[1], 'strikethrough');
+            const info = JSON.parse(app.get_node_info(tId[0], tId[1]));
+            if (info.textDecoration !== 'strikethrough') return `expected strikethrough, got ${info.textDecoration}`;
+            return true;
+        });
+
+        await t('decoration.undo', () => {
+            const app = window._app;
+            const tId = app.add_text('dec_undo', 'UNDO', -28400, -28000, 16, 1, 1, 1, 1);
+            app.set_text_decoration(tId[0], tId[1], 'underline');
+            app.undo();
+            const info = JSON.parse(app.get_node_info(tId[0], tId[1]));
+            if (info.textDecoration && info.textDecoration !== 'none') return `undo failed: ${info.textDecoration}`;
+            return true;
+        });
+
+        // Section: Text Vertical Alignment
+        // ═══════════════════════════════════════════════════════════
+
+        await t('vertical_align.center', () => {
+            const app = window._app;
+            const tId = app.add_text('va_test', 'CENTER', -28600, -28000, 16, 1, 1, 1, 1);
+            app.set_text_vertical_align(tId[0], tId[1], 'center');
+            const info = JSON.parse(app.get_node_info(tId[0], tId[1]));
+            if (info.textVerticalAlign !== 'center') return `expected center, got ${info.textVerticalAlign}`;
+            return true;
+        });
+
+        await t('vertical_align.bottom', () => {
+            const app = window._app;
+            const tId = app.add_text('va_test2', 'BOTTOM', -28800, -28000, 16, 1, 1, 1, 1);
+            app.set_text_vertical_align(tId[0], tId[1], 'bottom');
+            const info = JSON.parse(app.get_node_info(tId[0], tId[1]));
+            if (info.textVerticalAlign !== 'bottom') return `expected bottom, got ${info.textVerticalAlign}`;
+            return true;
+        });
+
+        // Section: Stroke Alignment
+        // ═══════════════════════════════════════════════════════════
+
+        await t('stroke_align.inside', () => {
+            const app = window._app;
+            const id = app.add_rectangle('sa_test', -29000, -29000, 100, 80, 1, 0, 0, 1);
+            app.set_node_stroke(id[0], id[1], 0, 0, 0, 1, 4);
+            app.set_stroke_align(id[0], id[1], 'inside');
+            const info = JSON.parse(app.get_node_info(id[0], id[1]));
+            if (info.strokeAlign !== 'inside') return `expected inside, got ${info.strokeAlign}`;
+            return true;
+        });
+
+        await t('stroke_align.outside', () => {
+            const app = window._app;
+            const id = app.add_rectangle('sa_test2', -29200, -29000, 100, 80, 0, 1, 0, 1);
+            app.set_node_stroke(id[0], id[1], 0, 0, 0, 1, 4);
+            app.set_stroke_align(id[0], id[1], 'outside');
+            const info = JSON.parse(app.get_node_info(id[0], id[1]));
+            if (info.strokeAlign !== 'outside') return `expected outside, got ${info.strokeAlign}`;
+            return true;
+        });
+
+        // Section: Star/Polygon Tool
+        // ═══════════════════════════════════════════════════════════
+
+        await t('star.five_pointed', () => {
+            const app = window._app;
+            const id = app.add_star('star5', -30000, -30000, 100, 100, 1, 0.8, 0, 1, 5, 0.38);
+            if (!id || id.length !== 2) return 'add_star returned invalid id';
+            const info = JSON.parse(app.get_node_info(id[0], id[1]));
+            if (info.type !== 'vector') return `expected vector, got ${info.type}`;
+            return true;
+        });
+
+        await t('star.triangle', () => {
+            const app = window._app;
+            const id = app.add_star('tri', -30200, -30000, 80, 80, 0, 0, 1, 1, 3, 1.0);
+            if (!id || id.length !== 2) return 'add_star returned invalid id';
+            return true;
+        });
+
+        await t('star.hexagon', () => {
+            const app = window._app;
+            const id = app.add_star('hex', -30400, -30000, 80, 80, 0, 1, 0, 1, 6, 1.0);
+            if (!id || id.length !== 2) return 'add_star returned invalid id';
+            return true;
+        });
+
+        // Section: Image Fill
+        // ═══════════════════════════════════════════════════════════
+
+        await t('image_fill.add', () => {
+            const app = window._app;
+            const id = app.add_image_fill('img_test', -31000, -31000, 200, 150, 'test.png', 'fill', 1.0);
+            if (!id || id.length !== 2) return 'add_image_fill returned invalid id';
+            const info = JSON.parse(app.get_node_info(id[0], id[1]));
+            if (info.type !== 'rectangle') return `expected rectangle, got ${info.type}`;
+            return true;
+        });
+
+        await t('image_fill.set_on_rect', () => {
+            const app = window._app;
+            const id = app.add_rectangle('rect_for_img', -31200, -31000, 100, 100, 1, 0, 0, 1);
+            const ok = app.set_image_fill(id[0], id[1], 'photo.jpg', 'fit', 0.8);
+            if (!ok) return 'set_image_fill returned false';
+            return true;
+        });
+
+        await t('image_fill.scale_modes', () => {
+            const app = window._app;
+            for (const mode of ['fill', 'fit', 'tile', 'stretch']) {
+                const id = app.add_image_fill(`img_${mode}`, -31400, -31000, 100, 100, 'test.png', mode, 1.0);
+                if (!id || id.length !== 2) return `add_image_fill failed for mode ${mode}`;
+            }
+            return true;
+        });
+
         // ═══════════════════════════════════════════════════════════
         // SUMMARY
         // ═══════════════════════════════════════════════════════════

@@ -246,8 +246,8 @@ app.add_ellipse("Ring-Inner", CX - R + 42, CY - R + 42, (R - 42) * 2, (R - 42) *
 app.add_text("Brand-Top", "STARBUCKS", CX - 50, CY - R + 26, 16.0, 1.0, 1.0, 1.0, 1.0);
 app.add_text("Brand-Bottom", "COFFEE", CX - 32, CY + R - 44, 16.0, 1.0, 1.0, 1.0, 1.0);
 // Stars (small diamonds)
-app.add_ellipse("Star-Left", CX - R + 34, CY - 5, 10, 10, 1.0, 1.0, 1.0, 1.0);
-app.add_ellipse("Star-Right", CX + R - 44, CY - 5, 10, 10, 1.0, 1.0, 1.0, 1.0);
+app.add_star("Star-Left", CX - R + 30, CY - 9, 18, 18, 1.0, 1.0, 1.0, 1.0, 5, 0.38);
+app.add_star("Star-Right", CX + R - 48, CY - 9, 18, 18, 1.0, 1.0, 1.0, 1.0, 5, 0.38);
 // Siren — head
 app.add_ellipse("Siren-Head", CX - 28, CY - 80, 56, 56, 1.0, 1.0, 1.0, 1.0);
 // Siren — crown (5-pointed crown using vector path)
@@ -291,6 +291,13 @@ app.add_vector("Tail-Right", CX + 10, CY + 20, 80, 70, 1.0, 1.0, 1.0, 1.0,
     ]);
 // Inner green mask circle (clips tail overflow)
 app.add_ellipse("Inner-Mask", CX - R + 48, CY - R + 48, (R - 48) * 2, (R - 48) * 2, 0.0, 0.39, 0.22, 0.0);
+
+// ─── Reference: Real Starbucks logo side-by-side ─────────────────────
+// Label for our version
+app.add_text("Label-Ours", "Our Version", CX - 60, CY + R + 30, 18.0, 1.0, 1.0, 1.0, 0.7);
+// Reference image from imports/starbucks.png
+app.add_image_fill("Starbucks-Reference", CX + R + 80, CY - R, R * 2, R * 2, "starbucks.png", "fit", 1.0);
+app.add_text("Label-Reference", "Reference (starbucks.png)", CX + R + 100, CY + R + 30, 18.0, 1.0, 1.0, 1.0, 0.7);
 
 // Page 4: Apple iPad "Explore the lineup" — built from scratch to match Figma 1:1
 const appleIPadPage = app.add_page("Apple iPad - Built from Scratch");
@@ -481,11 +488,8 @@ app.add_rectangle("Rectangle", 20, 50, 120, 100, 0.2, 0.5, 1.0, 1.0);
 app.add_rounded_rect("Rounded Rect", 160, 50, 120, 100, 0.95, 0.3, 0.2, 1.0, 16);
 app.add_ellipse("Ellipse", 300, 50, 120, 100, 0.3, 0.8, 0.4, 1.0);
 app.add_line("Line", 440, 100, 560, 50, 0.9, 0.1, 0.3, 1.0, 3.0);
-// Vector path: a star
-app.add_vector("Star", 580, 50, 100, 100, 1.0, 0.8, 0.0, 1.0, new Float32Array([
-    0, 50, 0, 1, 38, 38, 1, 100, 30, 1, 44, 22, 1, 80, 0, 1, 50, 18,
-    1, 20, 0, 1, 56, 22, 1, 0, 30, 1, 62, 38, 4
-]));
+// Star primitive (5-pointed)
+app.add_star("Star", 580, 50, 100, 100, 1.0, 0.8, 0.0, 1.0, 5, 0.38);
 app.add_text("Text Node", "Hello, Figma!", 710, 70, 24.0, 0.1, 0.1, 0.1, 1.0);
 app.clear_insert_parent();
 
@@ -678,6 +682,25 @@ function render(forceLayerUpdate = false): void {
     // Overlays
     if (app.pen_is_active()) drawPenOverlay();
     else if (app.is_vector_editing()) drawVectorEditOverlay();
+
+    // Creation preview (click-drag shape placement)
+    if (app.is_creating()) {
+        const preview = app.get_creation_preview();
+        if (preview.length === 4) {
+            const cam = app.get_camera();
+            const cx = cam[0], cy = cam[1], z = cam[2];
+            const sx = (preview[0] + cx) * z * dpr;
+            const sy = (preview[1] + cy) * z * dpr;
+            const sw = preview[2] * z * dpr;
+            const sh = preview[3] * z * dpr;
+            ctx.save();
+            ctx.strokeStyle = '#4285f4';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([6, 4]);
+            ctx.strokeRect(sx, sy, sw, sh);
+            ctx.restore();
+        }
+    }
 
     // Marquee selection rectangle
     drawMarqueeOverlay();
@@ -1061,7 +1084,14 @@ canvas.addEventListener('mousedown', (e: MouseEvent) => {
     if (app.is_vector_editing()) drawVectorEditOverlay();
 });
 
+const coordsEl = document.getElementById('coords')!;
 canvas.addEventListener('mousemove', (e: MouseEvent) => {
+    // Show world coordinates at cursor position
+    const cam = app.get_camera();
+    const wx = (e.offsetX / cam[2] + cam[0]).toFixed(0);
+    const wy = (e.offsetY / cam[2] + cam[1]).toFixed(0);
+    coordsEl.textContent = `X:${wx} Y:${wy}`;
+
     // Check if panning (any button held during pan)
     if (e.buttons > 0) {
         app.pan_move(e.offsetX, e.offsetY);
@@ -1083,6 +1113,7 @@ canvas.addEventListener('mousemove', (e: MouseEvent) => {
 
     if (e.buttons === 1 && !spaceHeld) {
         app.mouse_move(e.offsetX, e.offsetY);
+        if (app.is_creating()) render(); // live preview during shape creation drag
     }
     // Rotation cursor hint when hovering near corners
     if (e.buttons === 0 && !spaceHeld && !app.pen_is_active()) {
@@ -1106,8 +1137,14 @@ canvas.addEventListener('mouseup', (e: MouseEvent) => {
         return;
     }
     app.pan_end();
+    const wasCreating = app.is_creating();
     app.mouse_up();
     canvas.style.cursor = spaceHeld ? 'grab' : 'default';
+    render();
+    if (wasCreating) {
+        requestAnimationFrame(() => { updateLayersPanel(); });
+    }
+    updatePropertiesPanel();
     if (app.is_vector_editing()) drawVectorEditOverlay();
 });
 
@@ -1160,7 +1197,11 @@ window.addEventListener('keydown', (e: KeyboardEvent) => {
         render();
     }
     if (e.key === 'Escape') {
-        if (app.pen_is_active()) {
+        if (app.is_creating()) {
+            app.cancel_creating();
+            canvas.style.cursor = 'default';
+            render();
+        } else if (app.pen_is_active()) {
             app.pen_cancel();
             canvas.style.cursor = 'default';
         } else if (app.is_vector_editing()) {
@@ -1181,13 +1222,29 @@ window.addEventListener('keydown', (e: KeyboardEvent) => {
         canvas.style.cursor = 'grab';
         e.preventDefault();
     }
-    if (e.key === 'v' && !e.metaKey && !e.ctrlKey) {
+    // Toggle renderer (Ctrl/Cmd+Shift+V)
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
         useCanvas2d = !useCanvas2d;
         render();
     }
-    if (e.key === 'R' && !e.metaKey && !e.ctrlKey) {
+    // Toggle rulers (Ctrl/Cmd+Shift+R)
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'r') {
+        e.preventDefault();
         showRulers = !showRulers;
         render();
+    }
+    // Tool shortcuts (only when not typing in an input)
+    const tag = (e.target as HTMLElement).tagName;
+    if (tag !== 'INPUT' && tag !== 'TEXTAREA' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const toolKey = e.key.toLowerCase();
+        if (toolKey === 'r') { app.start_creating('rect'); canvas.style.cursor = 'crosshair'; render(); }
+        if (toolKey === 'o') { app.start_creating('ellipse'); canvas.style.cursor = 'crosshair'; render(); }
+        if (toolKey === 'f') { app.start_creating('frame'); canvas.style.cursor = 'crosshair'; render(); }
+        if (toolKey === 't') { app.start_creating('text'); canvas.style.cursor = 'crosshair'; render(); }
+        if (toolKey === 's' && !e.shiftKey) { app.start_creating('star'); canvas.style.cursor = 'crosshair'; render(); }
+        if (toolKey === 'p') { app.pen_start(); canvas.style.cursor = 'crosshair'; render(); }
+        if (toolKey === 'v') { canvas.style.cursor = 'default'; render(); }
     }
     // Copy/paste/duplicate
     if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
@@ -1378,34 +1435,36 @@ document.getElementById('toolbar')!.addEventListener('click', (e: Event) => {
     if (!action) return;
 
     switch (action) {
-        case 'add-frame': {
-            const x = 100 + Math.random() * 400;
-            const y = 100 + Math.random() * 300;
-            app.add_frame("Frame", x, y, 300, 200, 0.15, 0.15, 0.15, 1.0);
-            layersDirty = true;
-            break;
-        }
-        case 'add-rect': {
-            const x = 100 + Math.random() * 400;
-            const y = 100 + Math.random() * 300;
-            app.add_rectangle("Rect", x, y, 120, 80, Math.random(), Math.random(), Math.random(), 1.0);
-            layersDirty = true;
-            break;
-        }
-        case 'add-ellipse': {
-            const x = 100 + Math.random() * 400;
-            const y = 100 + Math.random() * 300;
-            app.add_ellipse("Ellipse", x, y, 100, 100, Math.random(), Math.random(), Math.random(), 1.0);
-            layersDirty = true;
-            break;
-        }
-        case 'add-text': {
-            const x = 100 + Math.random() * 400;
-            const y = 100 + Math.random() * 300;
-            app.add_text("Text", "Hello World", x, y, 24.0, 1.0, 1.0, 1.0, 1.0);
-            layersDirty = true;
-            break;
-        }
+        case 'add-rect':
+            app.start_creating('rect');
+            canvas.style.cursor = 'crosshair';
+            render();
+            return;
+        case 'add-ellipse':
+            app.start_creating('ellipse');
+            canvas.style.cursor = 'crosshair';
+            render();
+            return;
+        case 'add-text':
+            app.start_creating('text');
+            canvas.style.cursor = 'crosshair';
+            render();
+            return;
+        case 'add-star':
+            app.start_creating('star');
+            canvas.style.cursor = 'crosshair';
+            render();
+            return;
+        case 'add-polygon':
+            app.start_creating('rect'); // polygon uses star with inner_ratio=1.0, but start_creating doesn't support it yet — fallback to rect
+            canvas.style.cursor = 'crosshair';
+            render();
+            return;
+        case 'add-frame':
+            app.start_creating('frame');
+            canvas.style.cursor = 'crosshair';
+            render();
+            return;
         case 'pen':
             app.pen_start();
             canvas.style.cursor = 'crosshair';
@@ -1614,11 +1673,11 @@ const imageLoadingSet = new Set<string>(); // currently loading
 
 function drawImageFills(): void {
     const fillsJson = app.get_visible_image_fills(cssW, cssH);
-    let fills: [string, number, number, number, number, number, number|null, number|null, number|null, number|null][];
+    let fills: [string, number, number, number, number, number, number|null, number|null, number|null, number|null, string?][];
     try { fills = JSON.parse(fillsJson); } catch { return; }
     if (fills.length === 0) return;
 
-    for (const [path, sx, sy, sw, sh, opacity, clipX, clipY, clipW, clipH] of fills) {
+    for (const [path, sx, sy, sw, sh, opacity, clipX, clipY, clipW, clipH, scaleMode] of fills) {
         const img = imageCache.get(path);
         if (img) {
             ctx.save();
@@ -1628,23 +1687,47 @@ function drawImageFills(): void {
                 ctx.rect(clipX, clipY, clipW, clipH);
                 ctx.clip();
             }
-            // "Fill" mode: cover the destination rect while maintaining aspect ratio
-            // Calculate source crop for cover-style scaling
-            const imgAspect = img.naturalWidth / img.naturalHeight;
-            const destAspect = sw / sh;
-            let srcX = 0, srcY = 0, srcW = img.naturalWidth, srcH = img.naturalHeight;
-            if (imgAspect > destAspect) {
-                // Image wider than dest: crop sides
-                srcW = img.naturalHeight * destAspect;
-                srcX = (img.naturalWidth - srcW) / 2;
+            const mode = scaleMode || 'fill';
+            if (mode === 'stretch') {
+                // Stretch: ignore aspect ratio, fill dest exactly
+                ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, sx, sy, sw, sh);
+            } else if (mode === 'fit') {
+                // Fit: contain image within dest, preserving aspect ratio
+                const imgAspect = img.naturalWidth / img.naturalHeight;
+                const destAspect = sw / sh;
+                let dw: number, dh: number, dx: number, dy: number;
+                if (imgAspect > destAspect) {
+                    dw = sw; dh = sw / imgAspect;
+                    dx = sx; dy = sy + (sh - dh) / 2;
+                } else {
+                    dh = sh; dw = sh * imgAspect;
+                    dx = sx + (sw - dw) / 2; dy = sy;
+                }
+                ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, dx, dy, dw, dh);
+            } else if (mode === 'tile') {
+                // Tile: repeat image at natural size
+                const pat = ctx.createPattern(img, 'repeat');
+                if (pat) {
+                    ctx.fillStyle = pat;
+                    ctx.fillRect(sx, sy, sw, sh);
+                }
             } else {
-                // Image taller than dest: crop top/bottom
-                srcH = img.naturalWidth / destAspect;
-                srcY = (img.naturalHeight - srcH) / 2;
+                // Fill (default): cover dest, crop excess, maintain aspect ratio
+                const imgAspect = img.naturalWidth / img.naturalHeight;
+                const destAspect = sw / sh;
+                let srcX = 0, srcY = 0, srcW = img.naturalWidth, srcH = img.naturalHeight;
+                if (imgAspect > destAspect) {
+                    srcW = img.naturalHeight * destAspect;
+                    srcX = (img.naturalWidth - srcW) / 2;
+                } else {
+                    srcH = img.naturalWidth / destAspect;
+                    srcY = (img.naturalHeight - srcH) / 2;
+                }
+                ctx.drawImage(img, srcX, srcY, srcW, srcH, sx, sy, sw, sh);
             }
-            ctx.drawImage(img, srcX, srcY, srcW, srcH, sx, sy, sw, sh);
             ctx.restore();
-        } else if (!imageLoadingSet.has(path)) {
+        } else if (!imageLoadingSet.has(path) && !path.startsWith('user-image-')) {
+            // Load from /imports/ for file-based paths (not user-uploaded images)
             imageLoadingSet.add(path);
             const newImg = new Image();
             newImg.crossOrigin = 'anonymous';
@@ -2198,6 +2281,8 @@ function updatePropertiesPanel(): void {
         type: string;
         text: string;
         fontSize: number;
+        fontFamily?: string;
+        fontWeight?: number;
         opacity: number;
         blendMode: string;
         stroke: string;
@@ -2252,6 +2337,8 @@ function updatePropertiesPanel(): void {
             <div style="display:flex;align-items:center;gap:8px">
                 <div id="prop-fill-swatch" style="width:32px;height:24px;border:1px solid #555;border-radius:3px;background:${fillHex};cursor:pointer" data-hex="${fillHex}"></div>
                 <input id="prop-fill-hex" class="prop-input" value="${fillHex}" style="width:80px;font-family:monospace;font-size:12px" />
+                <button id="prop-fill-image" style="background:#444;color:#ddd;border:1px solid #555;border-radius:3px;padding:2px 8px;cursor:pointer;font-size:11px" title="Set image fill">Img</button>
+                <input type="file" id="prop-fill-image-input" accept="image/*" style="display:none" />
             </div>
         </div>
         <div class="prop-group">
@@ -2260,6 +2347,14 @@ function updatePropertiesPanel(): void {
                 <input type="color" id="prop-stroke" value="${strokeHex}" style="width:32px;height:24px;border:1px solid #555;border-radius:3px;background:none;cursor:pointer" />
                 <input class="prop-input" id="prop-stroke-weight" type="number" value="${nodeInfo.strokeWeight}" style="width:50px" min="0" step="0.5" />
                 <span style="font-size:10px;color:#666">px</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:4px;margin-top:4px">
+                <span style="font-size:10px;color:#666">Align</span>
+                <select id="prop-stroke-align" class="prop-input" style="flex:1;background:#333;color:#ddd;border:1px solid #555;padding:3px;border-radius:3px;font-size:11px">
+                    <option value="center"${nodeInfo.strokeAlign === 'center' ? ' selected' : ''}>Center</option>
+                    <option value="inside"${nodeInfo.strokeAlign === 'inside' ? ' selected' : ''}>Inside</option>
+                    <option value="outside"${nodeInfo.strokeAlign === 'outside' ? ' selected' : ''}>Outside</option>
+                </select>
             </div>
         </div>
         <div class="prop-group">
@@ -2318,6 +2413,21 @@ function updatePropertiesPanel(): void {
         ` : ''}
         ${nodeInfo.type === 'text' ? `
         <div class="prop-group">
+            <div class="prop-label">Font</div>
+            <div style="display:flex;gap:6px;align-items:center">
+                <select class="prop-input" id="prop-font-family" style="flex:1;background:#333;color:#ddd;border:1px solid #555;padding:3px 4px;border-radius:3px;font-size:12px">
+                    ${['Inter', 'Roboto', 'Poppins', 'Material Symbols Outlined', 'system-ui', 'sans-serif', 'serif', 'monospace'].map(f =>
+                        `<option value="${f}" ${(nodeInfo.fontFamily || 'Inter') === f ? 'selected' : ''} style="font-family:'${f}'">${f}</option>`
+                    ).join('')}
+                </select>
+                <select class="prop-input" id="prop-font-weight" style="width:70px;background:#333;color:#ddd;border:1px solid #555;padding:3px 4px;border-radius:3px;font-size:12px">
+                    ${[{v:300,l:'Light'},{v:400,l:'Regular'},{v:500,l:'Medium'},{v:600,l:'Semi'},{v:700,l:'Bold'}].map(w =>
+                        `<option value="${w.v}" ${(nodeInfo.fontWeight || 400) === w.v ? 'selected' : ''}>${w.l}</option>`
+                    ).join('')}
+                </select>
+            </div>
+        </div>
+        <div class="prop-group">
             <div class="prop-label">Font Size</div>
             <input class="prop-input" id="prop-font-size" type="number" value="${Math.round(nodeInfo.fontSize)}" style="width:60px" min="1" />
         </div>
@@ -2326,6 +2436,22 @@ function updatePropertiesPanel(): void {
             <div style="display:flex;gap:6px">
                 <label style="font-size:10px;color:#666">Spacing<input class="prop-input" id="prop-letter-spacing" type="number" value="${nodeInfo.letterSpacing || 0}" style="width:50px;margin-left:4px" step="0.5" /></label>
                 <label style="font-size:10px;color:#666">Line H<input class="prop-input" id="prop-line-height" type="number" value="${nodeInfo.lineHeight || 0}" style="width:50px;margin-left:4px" step="1" min="0" /></label>
+            </div>
+        </div>
+        <div class="prop-group">
+            <div class="prop-label">Decoration</div>
+            <div style="display:flex;gap:4px">
+                <button id="prop-dec-none" style="flex:1;padding:3px 6px;border:1px solid ${(nodeInfo.textDecoration || 'none') === 'none' ? '#4285f4' : '#555'};background:${(nodeInfo.textDecoration || 'none') === 'none' ? '#335' : '#2a2a2a'};color:#ddd;border-radius:3px;cursor:pointer;font-size:11px">None</button>
+                <button id="prop-dec-underline" style="flex:1;padding:3px 6px;border:1px solid ${nodeInfo.textDecoration === 'underline' ? '#4285f4' : '#555'};background:${nodeInfo.textDecoration === 'underline' ? '#335' : '#2a2a2a'};color:#ddd;border-radius:3px;cursor:pointer;font-size:11px;text-decoration:underline">U</button>
+                <button id="prop-dec-strike" style="flex:1;padding:3px 6px;border:1px solid ${nodeInfo.textDecoration === 'strikethrough' ? '#4285f4' : '#555'};background:${nodeInfo.textDecoration === 'strikethrough' ? '#335' : '#2a2a2a'};color:#ddd;border-radius:3px;cursor:pointer;font-size:11px;text-decoration:line-through">S</button>
+            </div>
+        </div>
+        <div class="prop-group">
+            <div class="prop-label">Vertical Align</div>
+            <div style="display:flex;gap:4px">
+                <button id="prop-va-top" style="flex:1;padding:3px 6px;border:1px solid ${(nodeInfo.textVerticalAlign || 'top') === 'top' ? '#4285f4' : '#555'};background:${(nodeInfo.textVerticalAlign || 'top') === 'top' ? '#335' : '#2a2a2a'};color:#ddd;border-radius:3px;cursor:pointer;font-size:11px">Top</button>
+                <button id="prop-va-center" style="flex:1;padding:3px 6px;border:1px solid ${nodeInfo.textVerticalAlign === 'center' ? '#4285f4' : '#555'};background:${nodeInfo.textVerticalAlign === 'center' ? '#335' : '#2a2a2a'};color:#ddd;border-radius:3px;cursor:pointer;font-size:11px">Mid</button>
+                <button id="prop-va-bottom" style="flex:1;padding:3px 6px;border:1px solid ${nodeInfo.textVerticalAlign === 'bottom' ? '#4285f4' : '#555'};background:${nodeInfo.textVerticalAlign === 'bottom' ? '#335' : '#2a2a2a'};color:#ddd;border-radius:3px;cursor:pointer;font-size:11px">Bot</button>
             </div>
         </div>
         <div class="prop-group">
@@ -2379,6 +2505,34 @@ function updatePropertiesPanel(): void {
             if (swatch) swatch.style.background = `#${hex}`;
         }
     });
+    // Image fill button
+    const imgFillBtn = document.getElementById('prop-fill-image');
+    const imgFillInput = document.getElementById('prop-fill-image-input') as HTMLInputElement;
+    if (imgFillBtn && imgFillInput) {
+        imgFillBtn.addEventListener('click', () => imgFillInput.click());
+        imgFillInput.addEventListener('change', () => {
+            const file = imgFillInput.files?.[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                const dataUrl = reader.result as string;
+                // Use a unique key for this image
+                const key = `user-image-${Date.now()}-${file.name}`;
+                // Pre-cache the image in our image cache
+                const img = new Image();
+                img.onload = () => {
+                    imageCache.set(key, img);
+                    app.set_image_fill(counter, clientId, key, 'fill', 1.0);
+                    render();
+                    updatePropertiesPanel();
+                };
+                img.src = dataUrl;
+            };
+            reader.readAsDataURL(file);
+            imgFillInput.value = '';
+        });
+    }
+
     commitProp('prop-stroke', (v) => {
         const r = parseInt(v.slice(1, 3), 16) / 255;
         const g = parseInt(v.slice(3, 5), 16) / 255;
@@ -2399,8 +2553,17 @@ function updatePropertiesPanel(): void {
             app.set_node_stroke(counter, clientId, r, g, b, 1.0, w);
         }
     });
+    commitProp('prop-stroke-align', (v) => {
+        app.set_stroke_align(counter, clientId, v);
+    });
     commitProp('prop-text', (v) => {
         app.set_node_text(counter, clientId, v);
+    });
+    commitProp('prop-font-family', (v) => {
+        app.set_node_font_family(counter, clientId, v);
+    });
+    commitProp('prop-font-weight', (v) => {
+        app.set_node_font_weight(counter, clientId, parseInt(v));
     });
     commitProp('prop-font-size', (v) => {
         app.set_node_font_size(counter, clientId, parseFloat(v));
@@ -2411,6 +2574,26 @@ function updatePropertiesPanel(): void {
     commitProp('prop-line-height', (v) => {
         app.set_line_height(counter, clientId, parseFloat(v));
     });
+
+    // Text decoration buttons
+    for (const [btnId, val] of [['prop-dec-none', 'none'], ['prop-dec-underline', 'underline'], ['prop-dec-strike', 'strikethrough']] as const) {
+        const btn = document.getElementById(btnId);
+        if (btn) btn.addEventListener('click', () => {
+            app.set_text_decoration(counter, clientId, val);
+            render();
+            updatePropertiesPanel();
+        });
+    }
+
+    // Text vertical align buttons
+    for (const [btnId, val] of [['prop-va-top', 'top'], ['prop-va-center', 'center'], ['prop-va-bottom', 'bottom']] as const) {
+        const btn = document.getElementById(btnId);
+        if (btn) btn.addEventListener('click', () => {
+            app.set_text_vertical_align(counter, clientId, val);
+            render();
+            updatePropertiesPanel();
+        });
+    }
 
     // Opacity slider — use 'input' for live feedback
     const opacityEl = document.getElementById('prop-opacity') as HTMLInputElement;

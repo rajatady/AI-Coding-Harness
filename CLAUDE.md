@@ -64,22 +64,23 @@ What's left: masks, component flattening, auto-layout computation. Use `./ide co
 - Adding fields to Style/Paint affects ALL 1.8M items. Use Option<Box<>> for rare fields.
 - `./ide check perf` is Rust-only. Real test = Playwright browser with 1.8M nodes.
 
-## PLAYWRIGHT STRESS TEST (2-minute protocol)
-How to verify in the real browser with Playwright MCP:
+## PLAYWRIGHT INTERACTION TESTING
+**CRITICAL: NEVER use browser_evaluate for interaction testing.**
+Use ONLY real mouse/keyboard events: browser_click, browser_drag, browser_press_key.
+JavaScript evaluate bypasses the actual DOM event pipeline and HIDES BUGS.
+The whole point of browser testing is to exercise the real event flow.
+
+browser_evaluate is ONLY allowed for:
+- Reading non-interactive state (node count, FPS counter text)
+- Page navigation when click is blocked by overlapping elements
+
+For stress testing:
 1. Start dev server: `cd app && npx vite` (port 3000)
 2. Navigate: `browser_navigate` to http://localhost:3000
-3. Wait for load: `browser_wait_for` "Stress test:" text in console
-4. Test operations via `browser_evaluate`:
-   - Pan: `wheel` events with deltaX/deltaY
-   - Zoom: `wheel` events with ctrlKey + deltaY
-   - Select All: `Cmd+A` via `browser_press_key("Meta+a")`
-   - Zoom to Fit: `Cmd+1`
-   - Delete: `Backspace`, Undo: `Cmd+Z`
-   - Page switch: click page tabs
-5. Read FPS: `browser_evaluate` to get timing from performance counters
-6. **NEVER use screenshots for assertions** — use `browser_snapshot` (2KB vs 100KB+)
-7. **NEVER keep sessions open** — close when done
-8. Expected: 60fps+ for pan/zoom, <1s for select-all, <500ms zoom-to-fit
+3. Use real interactions: click to select, drag to move/resize, keys to delete/undo
+4. **NEVER use screenshots for assertions** — use `browser_snapshot` (2KB vs 100KB+)
+5. **NEVER keep sessions open** — close when done
+6. Expected: 60fps+ for pan/zoom, <1s for select-all, <500ms zoom-to-fit
 
 ## PIXEL COMPARISON WORKFLOW
 Don't trust mental comparison. Use `./ide compare`:

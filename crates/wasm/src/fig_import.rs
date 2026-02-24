@@ -625,6 +625,12 @@ fn get_text_data(val: &Value) -> (Vec<TextRun>, TextAlign) {
         _ => TextAlign::Left,
     };
 
+    let decoration = match val.get("textDecoration").and_then(|v| v.as_str()) {
+        Some("UNDERLINE") => TextDecoration::Underline,
+        Some("STRIKETHROUGH") => TextDecoration::Strikethrough,
+        _ => TextDecoration::None,
+    };
+
     let runs = vec![TextRun {
         text: characters.to_string(),
         font_family,
@@ -634,6 +640,7 @@ fn get_text_data(val: &Value) -> (Vec<TextRun>, TextAlign) {
         color,
         letter_spacing,
         line_height,
+        decoration,
     }];
 
     (runs, align)

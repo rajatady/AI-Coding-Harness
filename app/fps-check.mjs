@@ -266,6 +266,31 @@ async function main() {
             `window._app.mouse_down(500, 400, false); window._app.mouse_up();`,
             `app.copy_selected(); app.paste();`, 10));
 
+        // ── ROTATION ─────────────────────────────────────────────────
+        results.push(await measureFps(page, 'rotation',
+            `const rid = window._app.add_rectangle('rot_test', -8000, -3000, 200, 200, 0, 1, 0, 1);
+             window._rotId = [rid[0], rid[1]];
+             window._app.select_node(rid[0], rid[1]);`,
+            `app.set_node_rotation(window._rotId[0], window._rotId[1], i * 5);`,
+            20));
+
+        // ── MARQUEE SELECT ───────────────────────────────────────────
+        results.push(await measureFps(page, 'marquee_select',
+            `window._app.set_camera(0, 0, 0.1); window._render(true);`,
+            `app.mouse_down(100, 100, false);
+             app.mouse_move(100 + i * 10, 100 + i * 8);`,
+            10));
+        await page.evaluate(() => { window._app.mouse_up(); });
+
+        // ── CLICK-DRAG CREATION ──────────────────────────────────────
+        results.push(await measureFps(page, 'click_drag_create',
+            `window._app.start_creating('rect');`,
+            `app.mouse_down(200 + i * 5, 200, false);
+             app.mouse_move(250 + i * 5, 250);
+             app.mouse_up();`,
+            10));
+        await page.evaluate(() => { window._app.cancel_creating(); });
+
         // ── SUMMARY ────────────────────────────────────────────────────
         console.log('FPS: ─────────────────────────────────────────');
         const fails = results.filter(r => r.status === 'FAIL');
