@@ -174,7 +174,7 @@ def cmd_check(args):
 
     if mode == "all":
         # Check everything: Rust + WASM + TypeScript + Tests + FPS + Workflow
-        for m in ["check", "wasm", "ts", "test", "fps", "workflow"]:
+        for m in ["check", "wasm", "ts", "test", "fps", "workflow", "features"]:
             cmd_check([m])
         return
 
@@ -359,21 +359,31 @@ def cmd_check(args):
     elif mode == "visual":
         # Build WASM first, then run visual check
         cmd_check(["wasm"])
-        cmd_visual(args)
+        cmd_visual(args[1:])
 
     elif mode == "fps":
         # Build WASM first, then measure fps
         cmd_check(["wasm"])
-        cmd_fps(args)
+        cmd_fps(args[1:])
 
     elif mode == "workflow":
         # Build WASM first, then run workflow tests
         cmd_check(["wasm"])
-        cmd_workflow(args)
+        cmd_workflow(args[1:])
+
+    elif mode == "features":
+        # Build WASM first, then run feature tests
+        cmd_check(["wasm"])
+        cmd_features(args[1:])
+
+    elif mode == "interactions":
+        # Build WASM first, then run interaction tests
+        cmd_check(["wasm"])
+        cmd_interactions(args[1:])
 
     else:
         print(f"Unknown check mode: {mode}")
-        print("Modes: check, build, wasm, test, render, spec, perf, ts, clippy, visual, fps, workflow, all")
+        print("Modes: check, build, wasm, test, render, spec, perf, ts, clippy, visual, fps, workflow, features, all")
 
 
 def _print_first_error(stderr: str):
@@ -1768,6 +1778,76 @@ def cmd_fps(args):
         print(w.replace("FPS:", "FPS: "))
 
 
+def cmd_features(args):
+    """
+    Headless feature verification — exercises every WASM API method.
+    71 tests across 21 sections. Binary PASS/FAIL. ~30 tokens output.
+    EXIT 0 = all pass.
+
+    Usage:
+        ./ide features          — run feature tests (assumes WASM built)
+        ./ide check features    — build WASM + run feature tests
+        ./ide features <filter> — run only tests matching filter
+    """
+    cmd_args = ["node", "feature-check.mjs"]
+    if args:
+        cmd_args.append(args[0])
+    result = subprocess.run(
+        cmd_args,
+        capture_output=True, text=True,
+        cwd=os.path.join(IDE_ROOT, "app"),
+        timeout=120
+    )
+    lines = [l for l in result.stdout.splitlines() if l.startswith("FEAT:")]
+    fails = [l for l in lines if "FAIL" in l]
+    passes = [l for l in lines if "PASS" in l]
+
+    # Summary line
+    summary = [l for l in lines if "PASS," in l and "FAIL" in l]
+    if summary:
+        print(summary[0])
+    elif result.returncode == 0:
+        print(f"FEATURES: OK — {len(passes)} pass")
+    else:
+        print(f"FEATURES: FAIL — {len(passes)} pass, {len(fails)} fail")
+
+    for f in fails:
+        print(f"  {f.strip()}")
+
+
+def cmd_interactions(args):
+    """
+    Headless mouse interaction test — tests ACTUAL mouse event flows.
+    Catches coordinate/hit-test bugs that API-level tests miss.
+    10 tests: click-select, drag-move, resize, rotation, group-enter,
+    vector-edit, marquee, undo/redo, escape, shift-select.
+    EXIT 0 = all pass.
+
+    Usage:
+        ./ide interactions       — run interaction tests (assumes WASM built)
+        ./ide check interactions — build WASM + run interaction tests
+    """
+    result = subprocess.run(
+        ["node", "interaction-check.mjs"],
+        capture_output=True, text=True,
+        cwd=os.path.join(IDE_ROOT, "app"),
+        timeout=120
+    )
+    lines = [l for l in result.stdout.splitlines() if l.startswith("INT:") or l.startswith("  INT:")]
+
+    summary = [l for l in lines if "PASS," in l and "FAIL" in l]
+    if summary:
+        print(summary[0])
+    elif result.returncode == 0:
+        print(f"INTERACTIONS: OK")
+    else:
+        print(f"INTERACTIONS: FAIL")
+
+    fails = [l for l in lines if "FAIL" in l and "PASS," not in l]
+    for f in fails:
+        print(f"  {f.strip()}")
+
+
 def cmd_gap(args):
     """
     Feature gap analysis — what's missing vs real Figma.
@@ -2681,6 +2761,8 @@ COMMANDS = {
     "todo": cmd_todo,
     "keys": cmd_keys,
     "pain": cmd_pain,
+    "features": cmd_features,
+    "interactions": cmd_interactions,
     "test-import": cmd_test_import,
     "compare": cmd_compare,
 }

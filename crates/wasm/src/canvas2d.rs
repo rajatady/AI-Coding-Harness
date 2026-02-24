@@ -5,33 +5,99 @@
 use wasm_bindgen::JsCast;
 use figma_engine::node::{CornerRadii, PathCommand, TextAlign};
 use figma_engine::properties::{BlendMode, Color, Effect, FillRule, Paint, StrokeCap, StrokeJoin};
-use figma_renderer::scene::{RenderItem, RenderShape};
+use figma_renderer::scene::{RenderItem, RenderShape, AABB};
 use web_sys::CanvasRenderingContext2d;
 
 /// Render world-space RenderItems with camera transform applied via Canvas 2D.
-/// No cloning — camera transform is applied per-item via ctx.setTransform().
-/// Items outside the screen viewport are skipped (O(visible) draw calls).
+/// Uses a spatial grid to find visible artboards in O(viewport_cells) instead of O(total_artboards).
+/// Returns number of items actually drawn (for diagnostics).
 pub fn render_items_with_camera(
     ctx: &CanvasRenderingContext2d,
     items: &[RenderItem],
+    spatial_grid: &std::collections::HashMap<(i32, i32), Vec<(usize, usize)>>,
+    grid_cell_size: f32,
     width: f64,
     height: f64,
     cam_x: f64,
     cam_y: f64,
     zoom: f64,
-) {
+    dpr: f64,
+) -> usize {
+    // Reset to DPR scale and clear in CSS coordinates
+    let _ = ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
     ctx.clear_rect(0.0, 0.0, width, height);
 
-    let mut clip_stack: Vec<usize> = Vec::new();
-    let len = items.len();
-    let mut i = 0;
+    if items.is_empty() {
+        return 0;
+    }
 
-    while i < len {
+    // If spatial grid is populated, use it for O(1) viewport lookups
+    if !spatial_grid.is_empty() {
+        let mut drawn = 0usize;
+
+        // Draw root item (page background)
+        drawn += render_item_range(ctx, items, 0, 1, width, height, cam_x, cam_y, zoom, dpr);
+
+        // Compute world-space viewport
+        let vp_left = cam_x as f32;
+        let vp_top = cam_y as f32;
+        let vp_right = cam_x as f32 + (width / zoom) as f32;
+        let vp_bottom = cam_y as f32 + (height / zoom) as f32;
+
+        // Find grid cells that overlap the viewport
+        let col_min = (vp_left / grid_cell_size).floor() as i32;
+        let col_max = (vp_right / grid_cell_size).floor() as i32;
+        let row_min = (vp_top / grid_cell_size).floor() as i32;
+        let row_max = (vp_bottom / grid_cell_size).floor() as i32;
+
+        // Collect unique artboard ranges from visible cells
+        // Use a small set to deduplicate (artboards can span multiple cells)
+        let mut seen = std::collections::HashSet::new();
+        for row in row_min..=row_max {
+            for col in col_min..=col_max {
+                if let Some(entries) = spatial_grid.get(&(col, row)) {
+                    for &(start, end) in entries {
+                        if seen.insert(start) {
+                            drawn += render_item_range(
+                                ctx, items, start, end,
+                                width, height, cam_x, cam_y, zoom, dpr,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        return drawn;
+    }
+
+    // Fallback: iterate all items (small documents without grid)
+    render_item_range(ctx, items, 0, items.len(), width, height, cam_x, cam_y, zoom, dpr)
+}
+
+/// Render a contiguous range of items [start..end) with full LOD/culling.
+fn render_item_range(
+    ctx: &CanvasRenderingContext2d,
+    items: &[RenderItem],
+    start: usize,
+    end: usize,
+    width: f64,
+    height: f64,
+    cam_x: f64,
+    cam_y: f64,
+    zoom: f64, // CSS zoom (for culling/LOD)
+    dpr: f64,  // device pixel ratio (for crisp rendering)
+) -> usize {
+    let rz = zoom * dpr; // render zoom: includes DPR for crisp output
+    let mut drawn = 0usize;
+    let mut clip_stack: Vec<usize> = Vec::new();
+    let mut i = start;
+
+    while i < end {
         let item = &items[i];
 
         // Pop any expired clip regions
-        while let Some(end) = clip_stack.last() {
-            if i >= *end {
+        while let Some(clip_end) = clip_stack.last() {
+            if i >= *clip_end {
                 clip_stack.pop();
                 ctx.restore();
             } else {
@@ -39,7 +105,7 @@ pub fn render_items_with_camera(
             }
         }
 
-        // Screen-space bounds check (cheap — just arithmetic, no allocation)
+        // Screen-space bounds check
         let sx_min = (item.world_bounds.min.x as f64 - cam_x) * zoom;
         let sy_min = (item.world_bounds.min.y as f64 - cam_y) * zoom;
         let sx_max = (item.world_bounds.max.x as f64 - cam_x) * zoom;
@@ -48,26 +114,22 @@ pub fn render_items_with_camera(
         let screen_w = sx_max - sx_min;
         let screen_h = sy_max - sy_min;
 
-        // Hierarchical LOD: if a subtree (frame/group) is small on screen,
+        // Hierarchical LOD: if a subtree is small on screen,
         // draw just the frame background and skip ALL descendants.
-        // At 1.8M nodes this turns O(N) iteration into O(visible_frames).
         if item.descendant_count > 0 && screen_w < 50.0 && screen_h < 50.0 {
-            if on_screen {
-                // Draw a simple filled rect as artboard thumbnail
+            if on_screen && !item.style.fills.is_empty() {
+                drawn += 1;
                 ctx.save();
                 let t = &item.world_transform;
                 let _ = ctx.set_transform(
-                    t.a as f64 * zoom, t.b as f64 * zoom,
-                    t.c as f64 * zoom, t.d as f64 * zoom,
-                    (t.tx as f64 - cam_x) * zoom, (t.ty as f64 - cam_y) * zoom,
+                    t.a as f64 * rz, t.b as f64 * rz,
+                    t.c as f64 * rz, t.d as f64 * rz,
+                    (t.tx as f64 - cam_x) * rz, (t.ty as f64 - cam_y) * rz,
                 );
-                if let Some(fill) = item.style.fills.first() {
-                    set_fill_style(ctx, fill, &item.shape);
-                }
+                set_fill_style(ctx, item.style.fills.first().unwrap(), &item.shape);
                 draw_shape(ctx, &item.shape, false);
                 ctx.restore();
             }
-            // Skip entire subtree
             i += 1 + item.descendant_count;
             continue;
         }
@@ -79,9 +141,8 @@ pub fn render_items_with_camera(
         }
 
         if !on_screen {
-            // Off-screen clipping frame: skip entire subtree
-            // Children are clipped to frame bounds → guaranteed off-screen too
-            if item.clips && item.descendant_count > 0 {
+            // Off-screen container with clipping: skip subtree
+            if item.descendant_count > 0 && item.clips {
                 i += 1 + item.descendant_count;
                 continue;
             }
@@ -89,14 +150,36 @@ pub fn render_items_with_camera(
             continue;
         }
 
+        drawn += 1;
+
+        // Mask node: use its shape as a clip path for subsequent siblings.
+        // Don't draw the mask itself — it only defines the clipping region.
+        if item.is_mask {
+            ctx.save();
+            let t = &item.world_transform;
+            let _ = ctx.set_transform(
+                t.a as f64 * rz, t.b as f64 * rz,
+                t.c as f64 * rz, t.d as f64 * rz,
+                (t.tx as f64 - cam_x) * rz, (t.ty as f64 - cam_y) * rz,
+            );
+            build_clip_path(ctx, &item.shape);
+            ctx.clip();
+            // Clip stays active until parent's descendant range ends.
+            // Find the enclosing parent clip end, or use the section end.
+            let clip_end = clip_stack.last().copied().unwrap_or(end);
+            clip_stack.push(clip_end);
+            i += 1;
+            continue;
+        }
+
         ctx.save();
 
-        // Apply world transform + camera in one setTransform call
+        // Apply world transform + camera + DPR in one setTransform call
         let t = &item.world_transform;
         let _ = ctx.set_transform(
-            t.a as f64 * zoom, t.b as f64 * zoom,
-            t.c as f64 * zoom, t.d as f64 * zoom,
-            (t.tx as f64 - cam_x) * zoom, (t.ty as f64 - cam_y) * zoom,
+            t.a as f64 * rz, t.b as f64 * rz,
+            t.c as f64 * rz, t.d as f64 * rz,
+            (t.tx as f64 - cam_x) * rz, (t.ty as f64 - cam_y) * rz,
         );
 
         if item.style.opacity < 1.0 {
@@ -110,7 +193,7 @@ pub fn render_items_with_camera(
 
         apply_effects(ctx, &item.style.effects);
 
-        if matches!(&item.shape, RenderShape::Text { .. }) {
+        if matches!(&item.shape, RenderShape::Text { .. } | RenderShape::Image { .. }) {
             draw_shape(ctx, &item.shape, false);
         } else {
             for paint in &item.style.fills {
@@ -133,8 +216,8 @@ pub fn render_items_with_camera(
             });
             if !item.style.dash_pattern.is_empty() {
                 let dashes = js_sys::Array::new_with_length(item.style.dash_pattern.len() as u32);
-                for (i, &d) in item.style.dash_pattern.iter().enumerate() {
-                    dashes.set(i as u32, wasm_bindgen::JsValue::from_f64(d as f64));
+                for (j, &d) in item.style.dash_pattern.iter().enumerate() {
+                    dashes.set(j as u32, wasm_bindgen::JsValue::from_f64(d as f64));
                 }
                 let _ = ctx.set_line_dash(&dashes);
             }
@@ -143,6 +226,9 @@ pub fn render_items_with_camera(
                 draw_shape(ctx, &item.shape, true);
             }
         }
+
+        // Draw inner shadows after fills/strokes
+        apply_inner_shadows(ctx, &item.style.effects, &item.shape);
 
         clear_effects(ctx);
         ctx.restore();
@@ -157,9 +243,9 @@ pub fn render_items_with_camera(
             ctx.save();
             let t = &item.world_transform;
             let _ = ctx.set_transform(
-                t.a as f64 * zoom, t.b as f64 * zoom,
-                t.c as f64 * zoom, t.d as f64 * zoom,
-                (t.tx as f64 - cam_x) * zoom, (t.ty as f64 - cam_y) * zoom,
+                t.a as f64 * rz, t.b as f64 * rz,
+                t.c as f64 * rz, t.d as f64 * rz,
+                (t.tx as f64 - cam_x) * rz, (t.ty as f64 - cam_y) * rz,
             );
             build_clip_path(ctx, &item.shape);
             ctx.clip();
@@ -172,15 +258,18 @@ pub fn render_items_with_camera(
     for _ in &clip_stack {
         ctx.restore();
     }
+
+    drawn
 }
 
 /// Draw the selection overlay for a selected node.
 pub fn draw_selection(
     ctx: &CanvasRenderingContext2d,
     x: f64, y: f64, w: f64, h: f64,
+    dpr: f64,
 ) {
     ctx.save();
-    let _ = ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+    let _ = ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
 
     // Selection border
     ctx.set_stroke_style_str("#4285f4");
@@ -244,7 +333,6 @@ fn set_fill_style(ctx: &CanvasRenderingContext2d, paint: &Paint, shape: &RenderS
             ctx.set_fill_style_str(&color_to_css(c));
         }
         Paint::LinearGradient { stops, start, end } => {
-            // start/end are in normalized [0,1] space — scale to shape dimensions
             let (w, h) = shape_dimensions(shape);
             let gradient = ctx.create_linear_gradient(
                 start.x as f64 * w, start.y as f64 * h,
@@ -274,8 +362,6 @@ fn set_fill_style(ctx: &CanvasRenderingContext2d, paint: &Paint, shape: &RenderS
             }
         }
         Paint::Image { opacity, .. } => {
-            // Image fills are drawn separately by draw_image_fill.
-            // Set a light gray placeholder so the shape isn't invisible.
             let a = (*opacity * 255.0) as u8;
             ctx.set_fill_style_str(&format!("rgba(200,200,200,{})", a as f32 / 255.0));
         }
@@ -331,7 +417,14 @@ fn apply_effects(ctx: &CanvasRenderingContext2d, effects: &[Effect]) {
                 ctx.set_shadow_offset_x(offset.x as f64);
                 ctx.set_shadow_offset_y(offset.y as f64);
             }
-            _ => {} // InnerShadow, LayerBlur, BackgroundBlur — skip for now
+            Effect::LayerBlur { radius } | Effect::BackgroundBlur { radius } => {
+                let _ = js_sys::Reflect::set(
+                    ctx.as_ref(),
+                    &wasm_bindgen::JsValue::from_str("filter"),
+                    &wasm_bindgen::JsValue::from_str(&format!("blur({}px)", radius)),
+                );
+            }
+            _ => {}
         }
     }
 }
@@ -362,6 +455,74 @@ fn clear_effects(ctx: &CanvasRenderingContext2d) {
     ctx.set_shadow_blur(0.0);
     ctx.set_shadow_offset_x(0.0);
     ctx.set_shadow_offset_y(0.0);
+    let _ = js_sys::Reflect::set(
+        ctx.as_ref(),
+        &wasm_bindgen::JsValue::from_str("filter"),
+        &wasm_bindgen::JsValue::from_str("none"),
+    );
+}
+
+/// Draw inner shadows by clipping to the shape, then drawing a large rect outside
+/// that casts its shadow inward through the clip boundary.
+fn apply_inner_shadows(ctx: &CanvasRenderingContext2d, effects: &[Effect], shape: &RenderShape) {
+    for effect in effects {
+        if let Effect::InnerShadow { color, offset, blur_radius, spread } = effect {
+            ctx.save();
+
+            // Build clip path from shape
+            match shape {
+                RenderShape::Rect { width, height, corner_radii } => {
+                    let w = *width as f64;
+                    let h = *height as f64;
+                    let (tl, tr, br, bl) = match corner_radii {
+                        CornerRadii::Uniform(r) => {
+                            let r = *r as f64;
+                            (r, r, r, r)
+                        }
+                        CornerRadii::PerCorner { top_left, top_right, bottom_right, bottom_left } =>
+                            (*top_left as f64, *top_right as f64, *bottom_right as f64, *bottom_left as f64),
+                    };
+                    ctx.begin_path();
+                    ctx.move_to(tl, 0.0);
+                    ctx.line_to(w - tr, 0.0);
+                    ctx.quadratic_curve_to(w, 0.0, w, tr);
+                    ctx.line_to(w, h - br);
+                    ctx.quadratic_curve_to(w, h, w - br, h);
+                    ctx.line_to(bl, h);
+                    ctx.quadratic_curve_to(0.0, h, 0.0, h - bl);
+                    ctx.line_to(0.0, tl);
+                    ctx.quadratic_curve_to(0.0, 0.0, tl, 0.0);
+                    ctx.close_path();
+                }
+                RenderShape::Ellipse { width, height, .. } => {
+                    let rx = *width as f64 / 2.0;
+                    let ry = *height as f64 / 2.0;
+                    ctx.begin_path();
+                    let _ = ctx.ellipse(rx, ry, rx, ry, 0.0, 0.0, std::f64::consts::TAU);
+                    ctx.close_path();
+                }
+                _ => {
+                    ctx.restore();
+                    continue;
+                }
+            }
+            ctx.clip();
+
+            // Set shadow properties
+            ctx.set_shadow_color(&color_to_css(color));
+            ctx.set_shadow_blur((*blur_radius + *spread) as f64);
+            ctx.set_shadow_offset_x(offset.x as f64);
+            ctx.set_shadow_offset_y(offset.y as f64);
+
+            // Fill a large rect around (but not overlapping) the shape.
+            // The shadow from this rect bleeds inward through the clip.
+            ctx.set_fill_style_str(&color_to_css(color));
+            let big = 10000.0;
+            ctx.fill_rect(-big, -big, big * 3.0, big * 3.0);
+
+            ctx.restore();
+        }
+    }
 }
 
 fn draw_shape(ctx: &CanvasRenderingContext2d, shape: &RenderShape, stroke_only: bool) {
@@ -398,7 +559,6 @@ fn draw_rect(ctx: &CanvasRenderingContext2d, w: f64, h: f64, radii: &CornerRadii
             else { ctx.fill_rect(0.0, 0.0, w, h); }
         }
         _ => {
-            // Build rounded rect path manually
             let (tl, tr, br, bl) = match radii {
                 CornerRadii::Uniform(r) => (*r as f64, *r as f64, *r as f64, *r as f64),
                 CornerRadii::PerCorner { top_left, top_right, bottom_right, bottom_left } =>
@@ -437,7 +597,6 @@ fn draw_ellipse(
     let _ = ctx.ellipse(cx, cy, rx, ry, 0.0, arc_start as f64, arc_end as f64);
 
     if inner_radius_ratio > 0.0 {
-        // Donut: draw inner ellipse in reverse
         let irx = rx * inner_radius_ratio as f64;
         let iry = ry * inner_radius_ratio as f64;
         let _ = ctx.ellipse(cx, cy, irx, iry, 0.0, arc_end as f64, arc_start as f64);
@@ -505,23 +664,77 @@ fn draw_text(
     ctx.set_text_align(text_align);
     ctx.set_text_baseline("top");
 
-    // Starting x depends on alignment
     let x_start = match align {
         TextAlign::Center => width / 2.0,
         TextAlign::Right => width,
         _ => 0.0,
     };
 
-    let mut x_offset = x_start;
+    let mut y_offset = 0.0;
     for run in runs {
-        let weight = if run.font_weight >= 700 { "bold " } else { "" };
+        // Build CSS font string with numeric weight for full granularity
         let style = if run.italic { "italic " } else { "" };
-        let font = format!("{}{}{:.0}px '{}', sans-serif", style, weight, run.font_size, run.font_family);
+        let font = format!("{}{} {:.0}px '{}', 'SF Pro Display', 'SF Pro Text', system-ui, -apple-system, 'Helvetica Neue', sans-serif",
+            style, run.font_weight, run.font_size, run.font_family);
         ctx.set_font(&font);
         ctx.set_fill_style_str(&color_to_css(&run.color));
-        let _ = ctx.fill_text(&run.text, x_offset, 0.0);
-        // Advance x for next run
-        x_offset += run.text.len() as f64 * run.font_size as f64 * 0.6;
+
+        // Letter spacing via Canvas 2D letterSpacing property
+        if run.letter_spacing.abs() > 0.01 {
+            let _ = js_sys::Reflect::set(
+                ctx.as_ref(),
+                &wasm_bindgen::JsValue::from_str("letterSpacing"),
+                &wasm_bindgen::JsValue::from_str(&format!("{:.1}px", run.letter_spacing)),
+            );
+        } else {
+            let _ = js_sys::Reflect::set(
+                ctx.as_ref(),
+                &wasm_bindgen::JsValue::from_str("letterSpacing"),
+                &wasm_bindgen::JsValue::from_str("0px"),
+            );
+        }
+
+        // Line height: explicit value or 1.2× font size
+        let line_h = run.line_height.unwrap_or(run.font_size * 1.2) as f64;
+
+        // Split on explicit newlines and render each line
+        for (line_idx, line) in run.text.split('\n').enumerate() {
+            if line_idx > 0 {
+                y_offset += line_h;
+            }
+            if !line.is_empty() {
+                // Word-wrap within the container width
+                let words: Vec<&str> = line.split(' ').collect();
+                let mut current_line = String::new();
+                let mut first_word_in_line = true;
+
+                for word in &words {
+                    let test_line = if first_word_in_line {
+                        word.to_string()
+                    } else {
+                        format!("{} {}", current_line, word)
+                    };
+
+                    let measured = ctx.measure_text(&test_line).map(|m| m.width()).unwrap_or(0.0);
+
+                    if !first_word_in_line && measured > width && !current_line.is_empty() {
+                        // Emit the current line
+                        let _ = ctx.fill_text(&current_line, x_start, y_offset);
+                        y_offset += line_h;
+                        current_line = word.to_string();
+                    } else {
+                        current_line = test_line;
+                    }
+                    first_word_in_line = false;
+                }
+
+                // Emit the last line
+                if !current_line.is_empty() {
+                    let _ = ctx.fill_text(&current_line, x_start, y_offset);
+                }
+            }
+        }
+        y_offset += line_h;
     }
 }
 
@@ -531,8 +744,6 @@ fn draw_image(
     data: &[u8],
     image_width: u32, image_height: u32,
 ) {
-    // Create ImageData, draw to temp canvas, then drawImage scaled to (w, h).
-    // drawImage respects the current transform (unlike putImageData).
     let clamped = wasm_bindgen::Clamped(data);
     let img_data = match web_sys::ImageData::new_with_u8_clamped_array_and_sh(
         clamped, image_width, image_height,
@@ -541,7 +752,6 @@ fn draw_image(
         Err(_) => return,
     };
 
-    // Create a temporary canvas to hold the raw pixels
     let window = match web_sys::window() {
         Some(w) => w,
         None => return,
@@ -569,7 +779,6 @@ fn draw_image(
     };
     let _ = tmp_ctx.put_image_data(&img_data, 0.0, 0.0);
 
-    // Draw scaled — this respects the current transform matrix
     let _ = ctx.draw_image_with_html_canvas_element_and_dw_and_dh(
         &tmp_canvas, 0.0, 0.0, w, h,
     );
@@ -618,8 +827,31 @@ fn build_clip_path(ctx: &CanvasRenderingContext2d, shape: &RenderShape) {
             ctx.begin_path();
             let _ = ctx.ellipse(cx, cy, cx, cy, 0.0, 0.0, std::f64::consts::TAU);
         }
+        RenderShape::Path { commands, .. } => {
+            ctx.begin_path();
+            for cmd in commands {
+                match cmd {
+                    PathCommand::MoveTo(p) => ctx.move_to(p.x as f64, p.y as f64),
+                    PathCommand::LineTo(p) => ctx.line_to(p.x as f64, p.y as f64),
+                    PathCommand::CubicTo { control1, control2, to } => {
+                        ctx.bezier_curve_to(
+                            control1.x as f64, control1.y as f64,
+                            control2.x as f64, control2.y as f64,
+                            to.x as f64, to.y as f64,
+                        );
+                    }
+                    PathCommand::QuadTo { control, to } => {
+                        ctx.quadratic_curve_to(
+                            control.x as f64, control.y as f64,
+                            to.x as f64, to.y as f64,
+                        );
+                    }
+                    PathCommand::Close => ctx.close_path(),
+                }
+            }
+        }
         _ => {
-            // For other shapes, clip to bounding box
+            // Line, Text, Image — use bounding rect as fallback clip
             ctx.begin_path();
             ctx.rect(0.0, 0.0, 10000.0, 10000.0);
         }

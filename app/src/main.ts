@@ -20,13 +20,21 @@ const layersList = document.getElementById('layers-list')!;
 const pageTabs = document.getElementById('page-tabs')!;
 const propertiesContent = document.getElementById('properties-content')!;
 
-// ─── Canvas sizing ───────────────────────────────────────────────────
+// ─── Canvas sizing (DPR-aware for crisp Retina rendering) ───────────
+
+const dpr = window.devicePixelRatio || 1;
+let cssW = 0;
+let cssH = 0;
 
 function resize(): void {
     const workspace = document.getElementById('workspace')!;
-    canvas.width = workspace.clientWidth - 480; // minus two panels
-    canvas.height = workspace.clientHeight;
-    app.set_viewport(canvas.width, canvas.height);
+    cssW = workspace.clientWidth - 480; // minus two panels
+    cssH = workspace.clientHeight;
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    canvas.style.width = cssW + 'px';
+    canvas.style.height = cssH + 'px';
+    app.set_viewport(cssW, cssH);
 }
 
 resize();
@@ -42,8 +50,9 @@ app.rename_page(0, "2M Stress Test");
 
 // Each artboard template: ~20 nodes (frame + nav + hero + cards + footer)
 // 100,000 artboards × 20 nodes = 2,000,000 nodes
-const STRESS_COLS = 200;
-const STRESS_ROWS = 500;
+const skipStress = new URLSearchParams(window.location.search).has('nostress');
+const STRESS_COLS = skipStress ? 0 : 200;
+const STRESS_ROWS = skipStress ? 0 : 500;
 const AW = 1440, AH = 900, AG = 100;
 const stressProducts = [
     { name: "iPhone 16 Pro Max", tc: [0.85,0.75,0.55], bg: [0,0,0] },
@@ -100,7 +109,7 @@ const stressMs = performance.now() - t0stress;
 console.log(`Stress test: ${stressIdx} artboards, ${stressIdx * 20} nodes created in ${stressMs.toFixed(0)}ms`);
 
 // Page 2: Apple Website — Multi-artboard design
-const applePage = app.add_page("Apple Website");
+const applePage = app.add_page("Apple Website - Ours, not imported");
 app.switch_page(applePage);
 
 // ── Artboard 1: Homepage Hero (iPhone 16 Pro) ──
@@ -283,14 +292,361 @@ app.add_vector("Tail-Right", CX + 10, CY + 20, 80, 70, 1.0, 1.0, 1.0, 1.0,
 // Inner green mask circle (clips tail overflow)
 app.add_ellipse("Inner-Mask", CX - R + 48, CY - R + 48, (R - 48) * 2, (R - 48) * 2, 0.0, 0.39, 0.22, 0.0);
 
-// Switch back to page 1 (80K test) as default view
-app.switch_page(0);
+// Page 4: Apple iPad "Explore the lineup" — built from scratch to match Figma 1:1
+const appleIPadPage = app.add_page("Apple iPad - Built from Scratch");
+app.switch_page(appleIPadPage);
+
+// Colors (Apple Design System)
+const cBg = [0.96, 0.96, 0.97] as const;        // #f5f5f7 section background
+const cBlack = [0.11, 0.11, 0.12] as const;      // #1d1d1f heading/body text
+const cGray = [0.43, 0.43, 0.45] as const;       // #6e6e73 description text
+const cBlue = [0.0, 0.44, 0.89] as const;        // #0071e3 button/link blue
+const cLinkBlue = [0.0, 0.4, 0.8] as const;      // #0066cc "Compare" link
+const cWhite = [1.0, 1.0, 1.0] as const;         // #ffffff
+
+// Layout constants
+const ART_W = 1440, ART_H = 1050;
+const SECTION_PAD_X = 80, SECTION_PAD_TOP = 70;
+const CARD_W = 310, CARD_H = 720, CARD_GAP = 24;
+const CARD_START_X = SECTION_PAD_X;
+const CARD_START_Y = 200;
+const IMG_H = 340, IMG_W = CARD_W;
+const DOT_Y = CARD_START_Y + IMG_H + 25;
+const DOT_R = 7;
+const NAME_Y = DOT_Y + 35;
+const DESC_Y = NAME_Y + 50;
+const PRICE_Y = DESC_Y + 50;
+const BTN_Y = PRICE_Y + 50;
+
+// ── Main artboard ──
+const artId = app.add_frame("iPad-Explore-Lineup", 0, 0, ART_W, ART_H, ...cBg, 1.0);
+app.set_insert_parent(artId[0], artId[1]);
+
+// ── Section Header ──
+app.add_text("Heading", "Explore the lineup.", SECTION_PAD_X, SECTION_PAD_TOP + 20, 48.0, ...cBlack, 1.0);
+app.add_text("Compare-Link", "Compare all models >", ART_W - 280, SECTION_PAD_TOP + 40, 17.0, ...cLinkBlue, 1.0);
+
+// ── Separator line below header ──
+app.add_rectangle("Header-Sep", SECTION_PAD_X, CARD_START_Y - 10, ART_W - 2 * SECTION_PAD_X, 1, 0.85, 0.85, 0.85, 1.0);
+
+// ── Product Cards ──
+interface CardData {
+    name: string;
+    desc: string;
+    price: string;
+    priceMo: string;
+    imgBg: readonly [number, number, number];
+    dots: readonly (readonly [number, number, number])[];
+}
+
+const cards: CardData[] = [
+    {
+        name: "iPad Pro",
+        desc: "The ultimate iPad experience\nwith the most advanced\ntechnology.",
+        price: "From $999",
+        priceMo: "or $83.25/mo.\nfor 12 mo.*",
+        imgBg: [0.0, 0.0, 0.0],  // black
+        dots: [[0.2,0.2,0.2], [0.75,0.75,0.75]],  // space black, silver
+    },
+    {
+        name: "iPad Air",
+        desc: "Serious performance in a\nthin and light design.",
+        price: "From $599",
+        priceMo: "or $49.91/mo.\nfor 12 mo.*",
+        imgBg: [0.12, 0.12, 0.14],  // dark
+        dots: [[0.55,0.55,0.6], [0.3,0.35,0.7], [0.75,0.65,0.85], [0.8,0.75,0.6]],
+    },
+    {
+        name: "iPad",
+        desc: "The colorful, all-screen\niPad for the things you\ndo every day.",
+        price: "From $349",
+        priceMo: "or $29.08/mo.\nfor 12 mo.*",
+        imgBg: [0.96, 0.96, 0.97],  // light
+        dots: [[0.2,0.25,0.55], [0.8,0.2,0.3], [0.85,0.75,0.2], [0.75,0.75,0.75]],
+    },
+    {
+        name: "iPad mini",
+        desc: "The full iPad experience\nin an ultraportable design.",
+        price: "From $499",
+        priceMo: "or $41.58/mo.\nfor 12 mo.*",
+        imgBg: [0.95, 0.93, 0.9],  // warm light
+        dots: [[0.2,0.2,0.2], [0.7,0.65,0.8], [0.3,0.35,0.7], [0.75,0.72,0.6]],
+    },
+];
+
+for (let i = 0; i < cards.length; i++) {
+    const c = cards[i];
+    const cx = CARD_START_X + i * (CARD_W + CARD_GAP);
+
+    // Product image background
+    app.add_rounded_rect(`Card${i}-ImgBg`, cx, CARD_START_Y, IMG_W, IMG_H, ...c.imgBg, 1.0, 16);
+
+    // Placeholder product silhouette (dark rectangle suggesting device shape)
+    const devW = 140, devH = 200;
+    const devX = cx + (IMG_W - devW) / 2;
+    const devY = CARD_START_Y + (IMG_H - devH) / 2 - 10;
+    const silR = c.imgBg[0] < 0.5 ? 0.15 : 0.75;
+    const silG = c.imgBg[1] < 0.5 ? 0.15 : 0.75;
+    const silB = c.imgBg[2] < 0.5 ? 0.17 : 0.77;
+    app.add_rounded_rect(`Card${i}-Device`, devX, devY, devW, devH, silR, silG, silB, 1.0, 12);
+    // Screen area inside device
+    app.add_rounded_rect(`Card${i}-Screen`, devX + 5, devY + 5, devW - 10, devH - 10, silR * 0.4, silG * 0.4, silB * 0.5, 1.0, 8);
+
+    // Color dots
+    const dotsW = c.dots.length * (DOT_R * 2 + 6) - 6;
+    const dotsStartX = cx + (CARD_W - dotsW) / 2;
+    for (let d = 0; d < c.dots.length; d++) {
+        const dx = dotsStartX + d * (DOT_R * 2 + 6);
+        app.add_ellipse(`Card${i}-Dot${d}`, dx, DOT_Y, DOT_R * 2, DOT_R * 2, ...c.dots[d], 1.0);
+    }
+
+    // Product name (bold, centered — approximate centering)
+    const nameW = c.name.length * 14;
+    app.add_text(`Card${i}-Name`, c.name, cx + (CARD_W - nameW) / 2, NAME_Y, 28.0, ...cBlack, 1.0);
+
+    // Description (smaller, gray, centered)
+    const descLines = c.desc.split('\n');
+    for (let li = 0; li < descLines.length; li++) {
+        const lineW = descLines[li].length * 7.5;
+        app.add_text(`Card${i}-Desc${li}`, descLines[li], cx + (CARD_W - lineW) / 2, DESC_Y + li * 20, 14.0, ...cGray, 1.0);
+    }
+
+    // Price (semibold)
+    const priceW = c.price.length * 8;
+    app.add_text(`Card${i}-Price`, c.price, cx + (CARD_W - priceW) / 2 - 30, PRICE_Y, 14.0, ...cBlack, 1.0);
+    // Price monthly
+    const moLines = c.priceMo.split('\n');
+    for (let li = 0; li < moLines.length; li++) {
+        app.add_text(`Card${i}-PriceMo${li}`, moLines[li], cx + (CARD_W - priceW) / 2 + priceW * 0.6, PRICE_Y + li * 18, 14.0, ...cBlack, 1.0);
+    }
+
+    // "Learn more" button — blue pill
+    const btnW = 140, btnH = 40;
+    const btnX = cx + (CARD_W / 2) - btnW - 10;
+    app.add_rounded_rect(`Card${i}-LearnBtn`, btnX, BTN_Y, btnW, btnH, ...cBlue, 1.0, 20);
+    app.add_text(`Card${i}-LearnTxt`, "Learn more", btnX + 22, BTN_Y + 10, 15.0, ...cWhite, 1.0);
+
+    // "Buy >" link text
+    app.add_text(`Card${i}-Buy`, "Buy >", cx + CARD_W / 2 + 20, BTN_Y + 10, 15.0, ...cBlue, 1.0);
+}
+
+// ── Spec Comparison Section (below cards) ──
+const specY = BTN_Y + 80;
+app.add_rectangle("Spec-Sep", SECTION_PAD_X, specY, ART_W - 2 * SECTION_PAD_X, 1, 0.85, 0.85, 0.85, 1.0);
+
+// Screen sizes
+const specSizes = ['13" or 11"', '13" or 11"', '10.9"', '8.3"'];
+const specDisplays = ['Ultra Retina XDR\ndisplay', 'Liquid Retina\ndisplay', 'Liquid Retina\ndisplay', 'Liquid Retina\ndisplay'];
+const specChips = ['M4 chip', 'M2 chip', 'A16 Bionic\nchip', 'A17 Pro\nchip'];
+
+for (let i = 0; i < 4; i++) {
+    const cx = CARD_START_X + i * (CARD_W + CARD_GAP);
+    const szW = specSizes[i].length * 12;
+    app.add_text(`Spec${i}-Size`, specSizes[i], cx + (CARD_W - szW) / 2, specY + 25, 22.0, ...cBlack, 1.0);
+
+    const dispLines = specDisplays[i].split('\n');
+    for (let li = 0; li < dispLines.length; li++) {
+        const lw = dispLines[li].length * 7;
+        app.add_text(`Spec${i}-Disp${li}`, dispLines[li], cx + (CARD_W - lw) / 2, specY + 60 + li * 18, 14.0, ...cGray, 1.0);
+    }
+
+    // Separator
+    app.add_rectangle(`Spec${i}-Sep2`, cx, specY + 110, CARD_W, 1, 0.85, 0.85, 0.85, 1.0);
+
+    const chipLines = specChips[i].split('\n');
+    for (let li = 0; li < chipLines.length; li++) {
+        const lw = chipLines[li].length * 7;
+        app.add_text(`Spec${i}-Chip${li}`, chipLines[li], cx + (CARD_W - lw) / 2, specY + 130 + li * 18, 14.0, ...cGray, 1.0);
+    }
+}
+
+// ── Navigation arrows at bottom ──
+app.add_text("Nav-Left", "<", ART_W / 2 - 30, ART_H - 40, 24.0, 0.7, 0.7, 0.7, 1.0);
+app.add_text("Nav-Right", ">", ART_W / 2 + 10, ART_H - 40, 24.0, 0.7, 0.7, 0.7, 1.0);
+
+app.clear_insert_parent();
+
+// ─── Page 5: Feature Showcase — Every Supported Feature ─────────────
+const showcasePage = app.add_page("Feature Showcase");
+app.switch_page(showcasePage);
+
+// Helper: get ID parts from add_* return value
+const id = (arr: Uint32Array) => [arr[0], arr[1]] as const;
+
+// ── Section 1: Primitive Shapes ──────────────────────────────────────
+const shapesFrame = id(app.add_frame("1. Shapes", 0, 0, 900, 200, 0.96, 0.96, 0.97, 1.0));
+app.set_insert_parent(shapesFrame[0], shapesFrame[1]);
+app.add_text("Shapes-Title", "Primitive Shapes", 20, 10, 18.0, 0.1, 0.1, 0.1, 1.0);
+app.add_rectangle("Rectangle", 20, 50, 120, 100, 0.2, 0.5, 1.0, 1.0);
+app.add_rounded_rect("Rounded Rect", 160, 50, 120, 100, 0.95, 0.3, 0.2, 1.0, 16);
+app.add_ellipse("Ellipse", 300, 50, 120, 100, 0.3, 0.8, 0.4, 1.0);
+app.add_line("Line", 440, 100, 560, 50, 0.9, 0.1, 0.3, 1.0, 3.0);
+// Vector path: a star
+app.add_vector("Star", 580, 50, 100, 100, 1.0, 0.8, 0.0, 1.0, new Float32Array([
+    0, 50, 0, 1, 38, 38, 1, 100, 30, 1, 44, 22, 1, 80, 0, 1, 50, 18,
+    1, 20, 0, 1, 56, 22, 1, 0, 30, 1, 62, 38, 4
+]));
+app.add_text("Text Node", "Hello, Figma!", 710, 70, 24.0, 0.1, 0.1, 0.1, 1.0);
+app.clear_insert_parent();
+
+// ── Section 2: Fills & Strokes ───────────────────────────────────────
+const fillsFrame = id(app.add_frame("2. Fills & Strokes", 0, 220, 900, 200, 0.96, 0.96, 0.97, 1.0));
+app.set_insert_parent(fillsFrame[0], fillsFrame[1]);
+app.add_text("Fills-Title", "Fills, Gradients & Strokes", 20, 10, 18.0, 0.1, 0.1, 0.1, 1.0);
+// Solid fill
+app.add_rectangle("Solid Fill", 20, 50, 100, 100, 0.0, 0.44, 0.89, 1.0);
+// Gradient fill
+app.add_gradient_rectangle("Linear Gradient", 140, 50, 100, 100,
+    0.0, 0.0, 1.0, 1.0,
+    new Float32Array([0.0, 1.0]),
+    new Float32Array([0.93, 0.2, 0.3, 1.0, 0.2, 0.3, 0.93, 1.0])
+);
+// Semi-transparent fill
+const semiId = id(app.add_rectangle("50% Opacity", 260, 50, 100, 100, 0.8, 0.2, 0.9, 1.0));
+app.set_node_opacity(semiId[0], semiId[1], 0.5);
+// Stroke
+const strokeId = id(app.add_rectangle("Stroked", 380, 50, 100, 100, 1.0, 1.0, 1.0, 1.0));
+app.set_node_stroke(strokeId[0], strokeId[1], 0.0, 0.0, 0.0, 1.0, 3.0);
+// Dashed stroke
+const dashedId = id(app.add_rectangle("Dashed", 500, 50, 100, 100, 1.0, 1.0, 1.0, 1.0));
+app.set_node_stroke(dashedId[0], dashedId[1], 0.9, 0.2, 0.2, 1.0, 2.0);
+app.set_dash_pattern(dashedId[0], dashedId[1], new Float32Array([8, 4]));
+// Per-corner radius
+const cornerId = id(app.add_rectangle("Per-Corner Radius", 620, 50, 100, 100, 0.2, 0.7, 0.5, 1.0));
+app.set_node_corner_radius(cornerId[0], cornerId[1], 0, 24, 0, 24);
+app.clear_insert_parent();
+
+// ── Section 3: Effects ───────────────────────────────────────────────
+const fxFrame = id(app.add_frame("3. Effects", 0, 440, 900, 200, 0.96, 0.96, 0.97, 1.0));
+app.set_insert_parent(fxFrame[0], fxFrame[1]);
+app.add_text("FX-Title", "Drop Shadow, Inner Shadow, Blur", 20, 10, 18.0, 0.1, 0.1, 0.1, 1.0);
+// Drop shadow
+const shadowId = id(app.add_rounded_rect("Drop Shadow", 20, 50, 120, 100, 1.0, 1.0, 1.0, 1.0, 12));
+app.add_drop_shadow(shadowId[0], shadowId[1], 0.0, 0.0, 0.0, 0.3, 4, 6, 12, 0);
+// Inner shadow
+const innerShadId = id(app.add_rounded_rect("Inner Shadow", 180, 50, 120, 100, 0.9, 0.9, 0.95, 1.0, 12));
+app.add_inner_shadow(innerShadId[0], innerShadId[1], 0.0, 0.0, 0.0, 0.4, 2, 3, 8, 0);
+// Blur
+const blurId = id(app.add_rectangle("Layer Blur", 340, 50, 120, 100, 0.0, 0.44, 0.89, 1.0));
+app.add_blur(blurId[0], blurId[1], 4.0);
+// Blend modes
+const blendBg = id(app.add_rectangle("Blend-BG", 500, 50, 140, 100, 0.9, 0.2, 0.2, 1.0));
+const blendFg = id(app.add_rectangle("Blend-Multiply", 540, 70, 100, 80, 0.2, 0.5, 0.9, 1.0));
+app.set_node_blend_mode(blendFg[0], blendFg[1], 2); // 2 = Multiply
+app.add_text("Blend-Label", "Multiply", 540, 160, 12.0, 0.4, 0.4, 0.4, 1.0);
+app.clear_insert_parent();
+
+// ── Section 4: Frames, Clipping & Auto-Layout ────────────────────────
+const layoutFrame = id(app.add_frame("4. Layout", 0, 660, 900, 240, 0.96, 0.96, 0.97, 1.0));
+app.set_insert_parent(layoutFrame[0], layoutFrame[1]);
+app.add_text("Layout-Title", "Frames, Clipping & Auto-Layout", 20, 10, 18.0, 0.1, 0.1, 0.1, 1.0);
+// Clipping frame — child overflows but is clipped
+const clipFrame = id(app.add_frame("Clip Frame", 20, 50, 120, 100, 0.85, 0.85, 0.9, 1.0));
+app.set_insert_parent(clipFrame[0], clipFrame[1]);
+app.add_ellipse("Overflows", -20, -20, 160, 140, 0.9, 0.3, 0.5, 1.0);
+app.clear_insert_parent();
+app.set_insert_parent(layoutFrame[0], layoutFrame[1]);
+// Auto-layout (horizontal)
+const autoH = id(app.add_frame("Auto H", 180, 50, 300, 60, 0.95, 0.95, 1.0, 1.0));
+app.set_auto_layout(autoH[0], autoH[1], 0, 12, 10, 10, 10, 10); // horizontal, 12px gap, 10px padding
+app.set_insert_parent(autoH[0], autoH[1]);
+app.add_rounded_rect("Chip-1", 0, 0, 80, 36, 0.0, 0.44, 0.89, 1.0, 18);
+app.add_rounded_rect("Chip-2", 0, 0, 80, 36, 0.3, 0.7, 0.3, 1.0, 18);
+app.add_rounded_rect("Chip-3", 0, 0, 80, 36, 0.9, 0.5, 0.1, 1.0, 18);
+app.clear_insert_parent();
+app.set_insert_parent(layoutFrame[0], layoutFrame[1]);
+// Auto-layout (vertical)
+const autoV = id(app.add_frame("Auto V", 500, 50, 150, 180, 1.0, 1.0, 1.0, 1.0));
+app.set_node_stroke(autoV[0], autoV[1], 0.8, 0.8, 0.8, 1.0, 1.0);
+app.set_auto_layout(autoV[0], autoV[1], 1, 8, 12, 12, 12, 12); // vertical, 8px gap
+app.set_insert_parent(autoV[0], autoV[1]);
+app.add_rectangle("Row-1", 0, 0, 126, 30, 0.95, 0.95, 0.97, 1.0);
+app.add_rectangle("Row-2", 0, 0, 126, 30, 0.9, 0.92, 0.97, 1.0);
+app.add_rectangle("Row-3", 0, 0, 126, 30, 0.85, 0.88, 0.95, 1.0);
+app.add_rectangle("Row-4", 0, 0, 126, 30, 0.8, 0.85, 0.93, 1.0);
+app.clear_insert_parent();
+app.clear_insert_parent();
+
+// ── Section 5: Groups & Boolean Ops ──────────────────────────────────
+const groupFrame = id(app.add_frame("5. Groups & Booleans", 0, 920, 900, 200, 0.96, 0.96, 0.97, 1.0));
+app.set_insert_parent(groupFrame[0], groupFrame[1]);
+app.add_text("Group-Title", "Groups, Boolean Ops", 20, 10, 18.0, 0.1, 0.1, 0.1, 1.0);
+app.add_text("Group-Info", "Select shapes → Cmd+G to group. Double-click to enter group.", 20, 160, 12.0, 0.5, 0.5, 0.5, 1.0);
+// Pre-made group
+app.add_rectangle("G-Rect1", 20, 50, 60, 80, 0.2, 0.6, 0.9, 1.0);
+app.add_rectangle("G-Rect2", 50, 70, 60, 80, 0.9, 0.4, 0.2, 1.0);
+// Boolean ops demo shapes (user can select + apply)
+app.add_text("Bool-Label", "Select two → Boolean Op:", 180, 55, 14.0, 0.3, 0.3, 0.3, 1.0);
+app.add_ellipse("Bool-A", 180, 80, 80, 80, 0.3, 0.3, 0.8, 0.7);
+app.add_ellipse("Bool-B", 220, 80, 80, 80, 0.8, 0.3, 0.3, 0.7);
+app.clear_insert_parent();
+
+// ── Section 6: Text Styles ───────────────────────────────────────────
+const textFrame = id(app.add_frame("6. Text", 0, 1140, 900, 200, 0.96, 0.96, 0.97, 1.0));
+app.set_insert_parent(textFrame[0], textFrame[1]);
+app.add_text("Text-Title", "Text Rendering", 20, 10, 18.0, 0.1, 0.1, 0.1, 1.0);
+app.add_text("Text-H1", "Heading 1", 20, 50, 48.0, 0.1, 0.1, 0.1, 1.0);
+app.add_text("Text-H2", "Heading 2", 20, 110, 32.0, 0.3, 0.3, 0.3, 1.0);
+app.add_text("Text-Body", "Body text at 16px with a longer paragraph that wraps.", 20, 155, 16.0, 0.4, 0.4, 0.4, 1.0);
+app.add_text("Text-Small", "Small caption • 12px", 400, 155, 12.0, 0.6, 0.6, 0.6, 1.0);
+const colorText = id(app.add_text("Text-Blue", "Colored text", 400, 60, 36.0, 0.0, 0.44, 0.89, 1.0));
+app.clear_insert_parent();
+
+// ── Section 7: Image (generated pixel data) ──────────────────────────
+const imgFrame = id(app.add_frame("7. Images", 0, 1360, 900, 220, 0.96, 0.96, 0.97, 1.0));
+app.set_insert_parent(imgFrame[0], imgFrame[1]);
+app.add_text("Img-Title", "Image Nodes (raw RGBA pixel data)", 20, 10, 18.0, 0.1, 0.1, 0.1, 1.0);
+// Generate a 64x64 gradient image in RGBA
+const imgW = 64, imgH = 64;
+const pixels = new Uint8Array(imgW * imgH * 4);
+for (let y = 0; y < imgH; y++) {
+    for (let x = 0; x < imgW; x++) {
+        const i = (y * imgW + x) * 4;
+        pixels[i]     = Math.floor(x / imgW * 255); // R: left-right gradient
+        pixels[i + 1] = Math.floor(y / imgH * 255); // G: top-bottom gradient
+        pixels[i + 2] = 128;                         // B: constant
+        pixels[i + 3] = 255;                         // A: opaque
+    }
+}
+app.add_image("Gradient Image", 20, 50, 150, 150, pixels, imgW, imgH);
+// Generate a checkerboard pattern
+const chkW = 64, chkH = 64;
+const chkPixels = new Uint8Array(chkW * chkH * 4);
+for (let y = 0; y < chkH; y++) {
+    for (let x = 0; x < chkW; x++) {
+        const i = (y * chkW + x) * 4;
+        const isWhite = ((Math.floor(x / 8) + Math.floor(y / 8)) % 2) === 0;
+        const v = isWhite ? 255 : 50;
+        chkPixels[i] = v; chkPixels[i+1] = v; chkPixels[i+2] = v; chkPixels[i+3] = 255;
+    }
+}
+app.add_image("Checkerboard", 200, 50, 150, 150, chkPixels, chkW, chkH);
+app.add_text("Img-Note", "Images are raw RGBA pixels passed to WASM. .fig import loads images from ZIP.", 380, 80, 13.0, 0.5, 0.5, 0.5, 1.0);
+app.clear_insert_parent();
+
+// ── Section 8: Interactive Features ──────────────────────────────────
+const interFrame = id(app.add_frame("8. Interactive", 0, 1600, 900, 180, 0.96, 0.96, 0.97, 1.0));
+app.set_insert_parent(interFrame[0], interFrame[1]);
+app.add_text("Inter-Title", "Interactive Features", 20, 10, 18.0, 0.1, 0.1, 0.1, 1.0);
+app.add_text("Inter-1", "• Click to select, Shift+click for multi-select", 20, 45, 14.0, 0.3, 0.3, 0.3, 1.0);
+app.add_text("Inter-2", "• Drag to move, corner handles to resize", 20, 65, 14.0, 0.3, 0.3, 0.3, 1.0);
+app.add_text("Inter-3", "• Cmd+Z undo, Cmd+Shift+Z redo", 20, 85, 14.0, 0.3, 0.3, 0.3, 1.0);
+app.add_text("Inter-4", "• Cmd+G group, Cmd+Shift+G ungroup", 20, 105, 14.0, 0.3, 0.3, 0.3, 1.0);
+app.add_text("Inter-5", "• Cmd+C copy, Cmd+V paste, Cmd+D duplicate", 20, 125, 14.0, 0.3, 0.3, 0.3, 1.0);
+app.add_text("Inter-6", "• Scroll to pan, Ctrl+scroll to zoom, Cmd+1 zoom to fit", 20, 145, 14.0, 0.3, 0.3, 0.3, 1.0);
+app.clear_insert_parent();
+
+// Default view: stress test page unless skipped
+if (!skipStress) {
+    app.switch_page(0); // back to stress test
+}
 
 // ─── Rendering ───────────────────────────────────────────────────────
 
 let lastSelCounter = -1;
 let lastSelClient = -1;
 let layersDirty = true;
+let panelUpdateTimer = 0;
 
 let useCanvas2d = true; // Vector rendering (Canvas 2D) by default
 let showRulers = true; // Show rulers along canvas edges
@@ -300,18 +656,31 @@ function render(forceLayerUpdate = false): void {
 
     if (useCanvas2d) {
         // Vector: GPU-accelerated Canvas 2D drawing from WASM
-        app.render_canvas2d(ctx, canvas.width, canvas.height);
+        // WASM handles DPR internally for crisp Retina rendering
+        app.render_canvas2d(ctx, cssW, cssH, dpr);
+        // Restore DPR scale for JS overlays (WASM leaves transform in unknown state)
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         // Overlay loaded images on top of WASM render
         drawImageFills();
     } else {
-        // Raster: CPU tile-based pixel buffer (fallback)
+        // Raster: CPU tile-based pixel buffer (fallback, uses backing store size)
         const pixels = app.render(canvas.width, canvas.height);
         const imageData = new ImageData(new Uint8ClampedArray(pixels), canvas.width, canvas.height);
         ctx.putImageData(imageData, 0, 0);
     }
 
+    // Ensure DPR scale for JS overlays
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
     // Draw rulers
     if (showRulers) drawRulers();
+
+    // Overlays
+    if (app.pen_is_active()) drawPenOverlay();
+    else if (app.is_vector_editing()) drawVectorEditOverlay();
+
+    // Marquee selection rectangle
+    drawMarqueeOverlay();
 
     const ms = performance.now() - t0;
     const fps = ms > 0 ? Math.round(1000 / ms) : 999;
@@ -323,18 +692,50 @@ function render(forceLayerUpdate = false): void {
     const selText = selCount > 1 ? ` | ${selCount} selected` : selCount === 1 ? ` | Selected: node ${sel[0]}` : '';
     const renderer = useCanvas2d ? 'Vector' : 'Raster';
     const snapText = app.get_snap_grid() > 0 ? ` | Grid:${app.get_snap_grid()}` : '';
-    info.textContent = `${app.node_count()} nodes | ${ms.toFixed(1)}ms (~${fps}fps) [${renderer}]${selText}${snapText}`;
+    const eg = app.get_entered_group();
+    const groupText = eg[0] >= 0 ? ' | Inside Group (Esc to exit)' : '';
+    info.textContent = `${app.node_count()} nodes | ${ms.toFixed(1)}ms (~${fps}fps) [${renderer}]${selText}${snapText}${groupText}`;
 
-    // Only update panels when selection changes or explicitly requested
+    // Defer panel updates to avoid blocking render loop.
+    // Panels are expensive with large trees (100K+ nodes) — update after render settles.
     const selChanged = selCounter !== lastSelCounter || selClient !== lastSelClient;
     if (selChanged || forceLayerUpdate || layersDirty) {
         lastSelCounter = selCounter;
         lastSelClient = selClient;
-        updateLayersPanel();
-        updatePropertiesPanel();
-        layersDirty = false;
+        if (panelUpdateTimer) cancelAnimationFrame(panelUpdateTimer);
+        panelUpdateTimer = requestAnimationFrame(() => {
+            updateLayersPanel();
+            updatePropertiesPanel();
+            layersDirty = false;
+            panelUpdateTimer = 0;
+        });
     }
     flushOps();
+}
+
+// ─── Marquee selection overlay ───────────────────────────────────────
+
+function drawMarqueeOverlay(): void {
+    const rect = app.get_marquee_rect();
+    if (rect.length < 4) return;
+    const [minWx, minWy, maxWx, maxWy] = rect;
+    const cam = app.get_camera();
+    const cx = cam[0], cy = cam[1], zoom = cam[2];
+    // World → screen
+    const sx = (minWx - cx) * zoom;
+    const sy = (minWy - cy) * zoom;
+    const sw = (maxWx - minWx) * zoom;
+    const sh = (maxWy - minWy) * zoom;
+    if (sw < 1 && sh < 1) return;
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = 'rgba(59, 130, 246, 0.08)';
+    ctx.fillRect(sx, sy, sw, sh);
+    ctx.strokeStyle = 'rgba(59, 130, 246, 0.6)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
+    ctx.strokeRect(sx, sy, sw, sh);
+    ctx.restore();
 }
 
 // ─── Pen tool overlay ────────────────────────────────────────────────
@@ -435,6 +836,124 @@ function drawPenOverlay(): void {
     ctx.restore();
 }
 
+// ─── Vector edit overlay ─────────────────────────────────────────────
+
+function drawVectorEditOverlay(): void {
+    const json = app.vector_edit_get_state();
+    if (!json) return;
+
+    const state = JSON.parse(json) as {
+        anchors: Array<{ x: number; y: number; hox: number; hoy: number; hix: number; hiy: number }>;
+        selected: number;
+        closed: boolean;
+        tx: number;
+        ty: number;
+    };
+    const cam = app.get_camera();
+    const camX = cam[0], camY = cam[1], zoom = cam[2];
+    const tx = state.tx, ty = state.ty;
+
+    // Local to screen conversion (anchors are in local space, tx/ty is world offset)
+    const toSx = (lx: number) => (lx + tx - camX) * zoom;
+    const toSy = (ly: number) => (ly + ty - camY) * zoom;
+
+    ctx.save();
+    const anchors = state.anchors;
+
+    // Draw path segments
+    if (anchors.length >= 2) {
+        ctx.beginPath();
+        ctx.strokeStyle = '#4285f4';
+        ctx.lineWidth = 2;
+        ctx.moveTo(toSx(anchors[0].x), toSy(anchors[0].y));
+        for (let i = 1; i < anchors.length; i++) {
+            const prev = anchors[i - 1];
+            const curr = anchors[i];
+            const hasHandles = (prev.hox !== 0 || prev.hoy !== 0 || curr.hix !== 0 || curr.hiy !== 0);
+            if (hasHandles) {
+                ctx.bezierCurveTo(
+                    toSx(prev.x + prev.hox), toSy(prev.y + prev.hoy),
+                    toSx(curr.x + curr.hix), toSy(curr.y + curr.hiy),
+                    toSx(curr.x), toSy(curr.y)
+                );
+            } else {
+                ctx.lineTo(toSx(curr.x), toSy(curr.y));
+            }
+        }
+        // Close path if closed
+        if (state.closed && anchors.length >= 3) {
+            const last = anchors[anchors.length - 1];
+            const first = anchors[0];
+            const hasHandles = (last.hox !== 0 || last.hoy !== 0 || first.hix !== 0 || first.hiy !== 0);
+            if (hasHandles) {
+                ctx.bezierCurveTo(
+                    toSx(last.x + last.hox), toSy(last.y + last.hoy),
+                    toSx(first.x + first.hix), toSy(first.y + first.hiy),
+                    toSx(first.x), toSy(first.y)
+                );
+            } else {
+                ctx.lineTo(toSx(first.x), toSy(first.y));
+            }
+        }
+        ctx.stroke();
+    }
+
+    // Draw handle lines and dots
+    for (let i = 0; i < anchors.length; i++) {
+        const a = anchors[i];
+        const sx = toSx(a.x), sy = toSy(a.y);
+
+        ctx.strokeStyle = '#888';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        if (a.hox !== 0 || a.hoy !== 0) {
+            const hx = toSx(a.x + a.hox), hy = toSy(a.y + a.hoy);
+            ctx.beginPath();
+            ctx.moveTo(sx, sy);
+            ctx.lineTo(hx, hy);
+            ctx.stroke();
+        }
+        if (a.hix !== 0 || a.hiy !== 0) {
+            const hx = toSx(a.x + a.hix), hy = toSy(a.y + a.hiy);
+            ctx.beginPath();
+            ctx.moveTo(sx, sy);
+            ctx.lineTo(hx, hy);
+            ctx.stroke();
+        }
+        ctx.setLineDash([]);
+
+        // Handle dots (blue circles)
+        ctx.fillStyle = '#4285f4';
+        if (a.hox !== 0 || a.hoy !== 0) {
+            const hx = toSx(a.x + a.hox), hy = toSy(a.y + a.hoy);
+            ctx.beginPath();
+            ctx.arc(hx, hy, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        if (a.hix !== 0 || a.hiy !== 0) {
+            const hx = toSx(a.x + a.hix), hy = toSy(a.y + a.hiy);
+            ctx.beginPath();
+            ctx.arc(hx, hy, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    // Draw anchor points (on top of handles)
+    for (let i = 0; i < anchors.length; i++) {
+        const a = anchors[i];
+        const sx = toSx(a.x), sy = toSy(a.y);
+        const isSelected = i === state.selected;
+
+        ctx.fillStyle = isSelected ? '#ff8800' : '#fff';
+        ctx.fillRect(sx - 4, sy - 4, 8, 8);
+        ctx.strokeStyle = '#4285f4';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(sx - 4, sy - 4, 8, 8);
+    }
+
+    ctx.restore();
+}
+
 // ─── Rulers ─────────────────────────────────────────────────────────
 
 const RULER_SIZE = 20;
@@ -445,7 +964,7 @@ const RULER_TICK = '#555';
 function drawRulers(): void {
     const cam = app.get_camera();
     const camX = cam[0], camY = cam[1], zoom = cam[2];
-    const w = canvas.width, h = canvas.height;
+    const w = cssW, h = cssH;
 
     // Choose tick interval based on zoom level
     let step = 100;
@@ -539,6 +1058,7 @@ canvas.addEventListener('mousedown', (e: MouseEvent) => {
     const hit = app.mouse_down(e.offsetX, e.offsetY, e.shiftKey);
     canvas.style.cursor = hit ? 'move' : 'default';
     render();
+    if (app.is_vector_editing()) drawVectorEditOverlay();
 });
 
 canvas.addEventListener('mousemove', (e: MouseEvent) => {
@@ -564,9 +1084,18 @@ canvas.addEventListener('mousemove', (e: MouseEvent) => {
     if (e.buttons === 1 && !spaceHeld) {
         app.mouse_move(e.offsetX, e.offsetY);
     }
+    // Rotation cursor hint when hovering near corners
+    if (e.buttons === 0 && !spaceHeld && !app.pen_is_active()) {
+        if (app.is_rotation_zone(e.offsetX, e.offsetY)) {
+            canvas.style.cursor = 'crosshair';
+        } else {
+            canvas.style.cursor = 'default';
+        }
+    }
     if (app.needs_render()) {
         render();
     }
+    if (app.is_vector_editing()) drawVectorEditOverlay();
 });
 
 canvas.addEventListener('mouseup', (e: MouseEvent) => {
@@ -579,13 +1108,19 @@ canvas.addEventListener('mouseup', (e: MouseEvent) => {
     app.pan_end();
     app.mouse_up();
     canvas.style.cursor = spaceHeld ? 'grab' : 'default';
+    if (app.is_vector_editing()) drawVectorEditOverlay();
 });
 
-canvas.addEventListener('dblclick', (_e: MouseEvent) => {
+canvas.addEventListener('dblclick', (e: MouseEvent) => {
     if (app.pen_is_active()) {
         app.pen_finish_open();
         render();
+        return;
     }
+    // Trigger double-click on the selected node (enters group or vector edit)
+    app.handle_double_click(e.offsetX, e.offsetY);
+    render();
+    if (app.is_vector_editing()) drawVectorEditOverlay();
 });
 
 // ─── Zoom (scroll wheel) ────────────────────────────────────────────
@@ -624,9 +1159,16 @@ window.addEventListener('keydown', (e: KeyboardEvent) => {
         layersDirty = true;
         render();
     }
-    if (e.key === 'Escape' && app.pen_is_active()) {
-        app.pen_cancel();
-        canvas.style.cursor = 'default';
+    if (e.key === 'Escape') {
+        if (app.pen_is_active()) {
+            app.pen_cancel();
+            canvas.style.cursor = 'default';
+        } else if (app.is_vector_editing()) {
+            app.vector_edit_exit();
+        } else {
+            // Exit entered group (if any) — Escape pops up one level
+            app.exit_group();
+        }
         render();
     }
     if (e.key === 'Enter' && app.pen_is_active()) {
@@ -973,9 +1515,16 @@ function importFigFile(file: File): void {
                 const img = new Image();
                 img.onload = () => {
                     imageCache.set(imgPath, img);
-                    // Also store under .png suffixed key (fig_import.rs appends .png to extensionless paths)
-                    if (!imgPath.includes('.')) {
+                    // Store under multiple keys so renderer can find images regardless of extension
+                    // ZIP has "images/hash.jpg" but fig_import.rs may reference "images/hash.png"
+                    const stem = imgPath.replace(/\.(png|jpg)$/, '');
+                    if (stem !== imgPath) {
+                        imageCache.set(stem, img);
+                        imageCache.set(stem + '.png', img);
+                        imageCache.set(stem + '.jpg', img);
+                    } else if (!imgPath.includes('.')) {
                         imageCache.set(imgPath + '.png', img);
+                        imageCache.set(imgPath + '.jpg', img);
                     }
                     imgLoaded++;
                     if (imgLoaded === imgTotal) {
@@ -1064,7 +1613,7 @@ const imageCache = new Map<string, HTMLImageElement>();
 const imageLoadingSet = new Set<string>(); // currently loading
 
 function drawImageFills(): void {
-    const fillsJson = app.get_visible_image_fills(canvas.width, canvas.height);
+    const fillsJson = app.get_visible_image_fills(cssW, cssH);
     let fills: [string, number, number, number, number, number, number|null, number|null, number|null, number|null][];
     try { fills = JSON.parse(fillsJson); } catch { return; }
     if (fills.length === 0) return;
@@ -1156,6 +1705,11 @@ async function importFigJson(url: string) {
 
 // Expose for console use: importFigJson('/imports/Coffee Shop-extracted/canvas.json')
 (window as any).importFigJson = importFigJson;
+(window as any).importFigFile = importFigFile;
+(window as any).setCamera = (x: number, y: number, zoom: number) => {
+    app.set_camera(x, y, zoom);
+    render();
+};
 
 // ─── Virtualized layers panel ────────────────────────────────────────
 
@@ -1279,11 +1833,24 @@ layersList.addEventListener('click', (e: Event) => {
         return;
     }
 
-    // Click on row → select
+    // Click on row → select and pan to node
     if (me.shiftKey) {
         app.toggle_select_node(counter, client);
     } else {
         app.select_node(counter, client);
+        // Pan viewport to center on the selected node (keep current zoom)
+        const wb = app.get_node_world_bounds(counter, client);
+        const cam = app.get_camera();
+        const zoom = cam[2];
+        const viewW = canvas.width / (window.devicePixelRatio || 1);
+        const viewH = canvas.height / (window.devicePixelRatio || 1);
+        // Center of the node in world coords
+        const nodeCx = wb[0] + wb[2] / 2;
+        const nodeCy = wb[1] + wb[3] / 2;
+        // Camera position so node center is at viewport center
+        const newCamX = nodeCx - (viewW / 2) / zoom;
+        const newCamY = nodeCy - (viewH / 2) / zoom;
+        app.set_camera(newCamX, newCamY, zoom);
     }
     render();
 });
@@ -1321,6 +1888,288 @@ pageTabs.addEventListener('click', (e: Event) => {
 });
 
 updatePageTabs();
+
+// ─── Color Picker (color_picker UI) ──────────────────────────────────
+
+// HSV ↔ RGB conversion helpers
+function hsvToRgb(h: number, s: number, v: number): [number, number, number] {
+    const c = v * s;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = v - c;
+    let r1 = 0, g1 = 0, b1 = 0;
+    if (h < 60) { r1 = c; g1 = x; }
+    else if (h < 120) { r1 = x; g1 = c; }
+    else if (h < 180) { g1 = c; b1 = x; }
+    else if (h < 240) { g1 = x; b1 = c; }
+    else if (h < 300) { r1 = x; b1 = c; }
+    else { r1 = c; b1 = x; }
+    return [r1 + m, g1 + m, b1 + m];
+}
+
+function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    const d = max - min;
+    const v = max;
+    const s = max === 0 ? 0 : d / max;
+    let h = 0;
+    if (d !== 0) {
+        if (max === r) h = 60 * (((g - b) / d) % 6);
+        else if (max === g) h = 60 * ((b - r) / d + 2);
+        else h = 60 * ((r - g) / d + 4);
+        if (h < 0) h += 360;
+    }
+    return [h, s, v];
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+    const h = (n: number) => Math.round(n * 255).toString(16).padStart(2, '0');
+    return `#${h(r)}${h(g)}${h(b)}`;
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+    const m = hex.replace('#', '');
+    return [parseInt(m.slice(0, 2), 16) / 255, parseInt(m.slice(2, 4), 16) / 255, parseInt(m.slice(4, 6), 16) / 255];
+}
+
+let activeColorPicker: HTMLElement | null = null;
+
+function closeColorPicker(): void {
+    if (activeColorPicker) {
+        activeColorPicker.remove();
+        activeColorPicker = null;
+    }
+}
+
+function openColorPicker(
+    anchorEl: HTMLElement,
+    initialR: number, initialG: number, initialB: number, initialA: number,
+    onChange: (r: number, g: number, b: number, a: number) => void
+): void {
+    closeColorPicker();
+
+    let [h, s, v] = rgbToHsv(initialR, initialG, initialB);
+    let alpha = initialA;
+
+    const popup = document.createElement('div');
+    popup.className = 'color-picker-popup';
+    popup.style.cssText = 'position:fixed;z-index:9999;background:#2a2a2a;border:1px solid #555;border-radius:8px;padding:12px;box-shadow:0 8px 32px rgba(0,0,0,0.5);width:220px;display:flex;flex-direction:column;gap:8px';
+
+    // Position near anchor
+    const rect = anchorEl.getBoundingClientRect();
+    popup.style.left = `${rect.left}px`;
+    popup.style.top = `${rect.bottom + 4}px`;
+
+    // SV gradient canvas (200x140)
+    const svCanvas = document.createElement('canvas');
+    svCanvas.width = 200; svCanvas.height = 140;
+    svCanvas.style.cssText = 'width:200px;height:140px;border-radius:4px;cursor:crosshair';
+
+    // Hue slider canvas
+    const hueCanvas = document.createElement('canvas');
+    hueCanvas.width = 200; hueCanvas.height = 14;
+    hueCanvas.style.cssText = 'width:200px;height:14px;border-radius:7px;cursor:pointer';
+
+    // Alpha slider canvas
+    const alphaCanvas = document.createElement('canvas');
+    alphaCanvas.width = 200; alphaCanvas.height = 14;
+    alphaCanvas.style.cssText = 'width:200px;height:14px;border-radius:7px;cursor:pointer';
+
+    // Hex input row
+    const inputRow = document.createElement('div');
+    inputRow.style.cssText = 'display:flex;gap:6px;align-items:center';
+    const hexInput = document.createElement('input');
+    hexInput.style.cssText = 'flex:1;background:#333;color:#ddd;border:1px solid #555;padding:3px 6px;border-radius:3px;font-size:12px;font-family:monospace';
+    const alphaInput = document.createElement('input');
+    alphaInput.type = 'number'; alphaInput.min = '0'; alphaInput.max = '100'; alphaInput.step = '1';
+    alphaInput.style.cssText = 'width:48px;background:#333;color:#ddd;border:1px solid #555;padding:3px 4px;border-radius:3px;font-size:12px';
+    const pctLabel = document.createElement('span');
+    pctLabel.textContent = '%';
+    pctLabel.style.cssText = 'font-size:11px;color:#888';
+    inputRow.appendChild(hexInput);
+    inputRow.appendChild(alphaInput);
+    inputRow.appendChild(pctLabel);
+
+    popup.appendChild(svCanvas);
+    popup.appendChild(hueCanvas);
+    popup.appendChild(alphaCanvas);
+    popup.appendChild(inputRow);
+    document.body.appendChild(popup);
+    activeColorPicker = popup;
+
+    // Keep popup on screen
+    const popupRect = popup.getBoundingClientRect();
+    if (popupRect.right > window.innerWidth) popup.style.left = `${window.innerWidth - popupRect.width - 8}px`;
+    if (popupRect.bottom > window.innerHeight) popup.style.top = `${rect.top - popupRect.height - 4}px`;
+
+    function drawSV(): void {
+        const ctx = svCanvas.getContext('2d')!;
+        // Base hue color
+        const [hr, hg, hb] = hsvToRgb(h, 1, 1);
+        // White → hue (left to right = saturation)
+        const gradH = ctx.createLinearGradient(0, 0, 200, 0);
+        gradH.addColorStop(0, '#ffffff');
+        gradH.addColorStop(1, rgbToHex(hr, hg, hb));
+        ctx.fillStyle = gradH;
+        ctx.fillRect(0, 0, 200, 140);
+        // Black overlay (top to bottom = value)
+        const gradV = ctx.createLinearGradient(0, 0, 0, 140);
+        gradV.addColorStop(0, 'rgba(0,0,0,0)');
+        gradV.addColorStop(1, 'rgba(0,0,0,1)');
+        ctx.fillStyle = gradV;
+        ctx.fillRect(0, 0, 200, 140);
+        // Indicator circle
+        const ix = s * 200, iy = (1 - v) * 140;
+        ctx.beginPath();
+        ctx.arc(ix, iy, 6, 0, Math.PI * 2);
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(ix, iy, 5, 0, Math.PI * 2);
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    }
+
+    function drawHue(): void {
+        const ctx = hueCanvas.getContext('2d')!;
+        const grad = ctx.createLinearGradient(0, 0, 200, 0);
+        for (let i = 0; i <= 6; i++) {
+            const [r, g, b] = hsvToRgb(i * 60, 1, 1);
+            grad.addColorStop(i / 6, rgbToHex(r, g, b));
+        }
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.roundRect(0, 0, 200, 14, 7);
+        ctx.fill();
+        // Indicator
+        const hx = (h / 360) * 200;
+        ctx.beginPath();
+        ctx.arc(Math.max(7, Math.min(193, hx)), 7, 6, 0, Math.PI * 2);
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    }
+
+    function drawAlpha(): void {
+        const ctx = alphaCanvas.getContext('2d')!;
+        // Checkerboard background
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, 200, 14);
+        ctx.fillStyle = '#ccc';
+        for (let x = 0; x < 200; x += 7) {
+            for (let y = 0; y < 14; y += 7) {
+                if ((Math.floor(x / 7) + Math.floor(y / 7)) % 2 === 0) {
+                    ctx.fillRect(x, y, 7, 7);
+                }
+            }
+        }
+        const [r, g, b] = hsvToRgb(h, s, v);
+        const grad = ctx.createLinearGradient(0, 0, 200, 0);
+        grad.addColorStop(0, `rgba(${Math.round(r*255)},${Math.round(g*255)},${Math.round(b*255)},0)`);
+        grad.addColorStop(1, `rgba(${Math.round(r*255)},${Math.round(g*255)},${Math.round(b*255)},1)`);
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.roundRect(0, 0, 200, 14, 7);
+        ctx.fill();
+        // Indicator
+        const ax = alpha * 200;
+        ctx.beginPath();
+        ctx.arc(Math.max(7, Math.min(193, ax)), 7, 6, 0, Math.PI * 2);
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    }
+
+    function updateInputs(): void {
+        const [r, g, b] = hsvToRgb(h, s, v);
+        hexInput.value = rgbToHex(r, g, b).toUpperCase();
+        alphaInput.value = String(Math.round(alpha * 100));
+    }
+
+    function emitChange(): void {
+        const [r, g, b] = hsvToRgb(h, s, v);
+        onChange(r, g, b, alpha);
+    }
+
+    function redraw(): void { drawSV(); drawHue(); drawAlpha(); updateInputs(); }
+
+    // SV drag
+    function handleSV(e: MouseEvent): void {
+        const r = svCanvas.getBoundingClientRect();
+        s = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+        v = Math.max(0, Math.min(1, 1 - (e.clientY - r.top) / r.height));
+        redraw(); emitChange();
+    }
+    svCanvas.addEventListener('mousedown', (e) => {
+        handleSV(e);
+        const move = (e2: MouseEvent) => handleSV(e2);
+        const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+    });
+
+    // Hue drag
+    function handleHue(e: MouseEvent): void {
+        const r = hueCanvas.getBoundingClientRect();
+        h = Math.max(0, Math.min(360, ((e.clientX - r.left) / r.width) * 360));
+        redraw(); emitChange();
+    }
+    hueCanvas.addEventListener('mousedown', (e) => {
+        handleHue(e);
+        const move = (e2: MouseEvent) => handleHue(e2);
+        const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+    });
+
+    // Alpha drag
+    function handleAlpha(e: MouseEvent): void {
+        const r = alphaCanvas.getBoundingClientRect();
+        alpha = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+        redraw(); emitChange();
+    }
+    alphaCanvas.addEventListener('mousedown', (e) => {
+        handleAlpha(e);
+        const move = (e2: MouseEvent) => handleAlpha(e2);
+        const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+    });
+
+    // Hex input
+    hexInput.addEventListener('change', () => {
+        const val = hexInput.value.replace('#', '');
+        if (/^[0-9a-fA-F]{6}$/.test(val)) {
+            const [r, g, b] = hexToRgb(val);
+            [h, s, v] = rgbToHsv(r, g, b);
+            redraw(); emitChange();
+        }
+    });
+
+    // Alpha input
+    alphaInput.addEventListener('change', () => {
+        alpha = Math.max(0, Math.min(1, parseInt(alphaInput.value) / 100));
+        redraw(); emitChange();
+    });
+
+    // Close on click outside
+    setTimeout(() => {
+        const closer = (e: MouseEvent) => {
+            if (!popup.contains(e.target as Node) && !anchorEl.contains(e.target as Node)) {
+                closeColorPicker();
+                document.removeEventListener('mousedown', closer);
+            }
+        };
+        document.addEventListener('mousedown', closer);
+    }, 0);
+
+    redraw();
+}
 
 // ─── Properties panel ────────────────────────────────────────────────
 
@@ -1392,10 +2241,17 @@ function updatePropertiesPanel(): void {
             </div>
         </div>
         <div class="prop-group">
+            <div class="prop-label">Rotation</div>
+            <div style="display:flex;align-items:center;gap:4px">
+                <input class="prop-input" id="prop-rotation" type="number" value="${Math.round(nodeInfo.rotation || 0)}" style="width:60px" step="1" />
+                <span style="font-size:10px;color:#666">°</span>
+            </div>
+        </div>
+        <div class="prop-group">
             <div class="prop-label">Fill</div>
             <div style="display:flex;align-items:center;gap:8px">
-                <input type="color" id="prop-fill" value="${fillHex}" style="width:32px;height:24px;border:1px solid #555;border-radius:3px;background:none;cursor:pointer" />
-                <span style="font-size:12px;color:#aaa">${fillHex}</span>
+                <div id="prop-fill-swatch" style="width:32px;height:24px;border:1px solid #555;border-radius:3px;background:${fillHex};cursor:pointer" data-hex="${fillHex}"></div>
+                <input id="prop-fill-hex" class="prop-input" value="${fillHex}" style="width:80px;font-family:monospace;font-size:12px" />
             </div>
         </div>
         <div class="prop-group">
@@ -1466,6 +2322,13 @@ function updatePropertiesPanel(): void {
             <input class="prop-input" id="prop-font-size" type="number" value="${Math.round(nodeInfo.fontSize)}" style="width:60px" min="1" />
         </div>
         <div class="prop-group">
+            <div class="prop-label">Typography</div>
+            <div style="display:flex;gap:6px">
+                <label style="font-size:10px;color:#666">Spacing<input class="prop-input" id="prop-letter-spacing" type="number" value="${nodeInfo.letterSpacing || 0}" style="width:50px;margin-left:4px" step="0.5" /></label>
+                <label style="font-size:10px;color:#666">Line H<input class="prop-input" id="prop-line-height" type="number" value="${nodeInfo.lineHeight || 0}" style="width:50px;margin-left:4px" step="1" min="0" /></label>
+            </div>
+        </div>
+        <div class="prop-group">
             <div class="prop-label">Text</div>
             <textarea id="prop-text" class="prop-input" style="width:100%;min-height:48px;resize:vertical;font-family:monospace;font-size:12px">${nodeInfo.text}</textarea>
         </div>
@@ -1487,11 +2350,34 @@ function updatePropertiesPanel(): void {
     commitProp('prop-y', (v) => app.set_node_position(counter, clientId, parseFloat((document.getElementById('prop-x') as HTMLInputElement).value), parseFloat(v)));
     commitProp('prop-w', (v) => app.set_node_size(counter, clientId, parseFloat(v), parseFloat((document.getElementById('prop-h') as HTMLInputElement).value)));
     commitProp('prop-h', (v) => app.set_node_size(counter, clientId, parseFloat((document.getElementById('prop-w') as HTMLInputElement).value), parseFloat(v)));
-    commitProp('prop-fill', (v) => {
-        const r = parseInt(v.slice(1, 3), 16) / 255;
-        const g = parseInt(v.slice(3, 5), 16) / 255;
-        const b = parseInt(v.slice(5, 7), 16) / 255;
-        app.set_node_fill(counter, clientId, r, g, b, 1.0);
+    commitProp('prop-rotation', (v) => app.set_node_rotation(counter, clientId, parseFloat(v)));
+    // Fill color: swatch opens color picker, hex input for direct entry
+    const fillSwatch = document.getElementById('prop-fill-swatch');
+    if (fillSwatch) {
+        // Parse initial color from fill info
+        const initMatch = nodeInfo.fill.match(/rgba?\((\d+),(\d+),(\d+),?([\d.]*)/);
+        const ir = initMatch ? parseInt(initMatch[1]) / 255 : 0.5;
+        const ig = initMatch ? parseInt(initMatch[2]) / 255 : 0.5;
+        const ib = initMatch ? parseInt(initMatch[3]) / 255 : 0.5;
+        const ia = initMatch && initMatch[4] ? parseFloat(initMatch[4]) : 1.0;
+        fillSwatch.addEventListener('click', () => {
+            openColorPicker(fillSwatch, ir, ig, ib, ia, (r, g, b, a) => {
+                app.set_node_fill(counter, clientId, r, g, b, a);
+                fillSwatch.style.background = rgbToHex(r, g, b);
+                const hexIn = document.getElementById('prop-fill-hex') as HTMLInputElement;
+                if (hexIn) hexIn.value = rgbToHex(r, g, b).toUpperCase();
+                render();
+            });
+        });
+    }
+    commitProp('prop-fill-hex', (v) => {
+        const hex = v.replace('#', '');
+        if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+            const [r, g, b] = hexToRgb(hex);
+            app.set_node_fill(counter, clientId, r, g, b, 1.0);
+            const swatch = document.getElementById('prop-fill-swatch');
+            if (swatch) swatch.style.background = `#${hex}`;
+        }
     });
     commitProp('prop-stroke', (v) => {
         const r = parseInt(v.slice(1, 3), 16) / 255;
@@ -1518,6 +2404,12 @@ function updatePropertiesPanel(): void {
     });
     commitProp('prop-font-size', (v) => {
         app.set_node_font_size(counter, clientId, parseFloat(v));
+    });
+    commitProp('prop-letter-spacing', (v) => {
+        app.set_letter_spacing(counter, clientId, parseFloat(v));
+    });
+    commitProp('prop-line-height', (v) => {
+        app.set_line_height(counter, clientId, parseFloat(v));
     });
 
     // Opacity slider — use 'input' for live feedback

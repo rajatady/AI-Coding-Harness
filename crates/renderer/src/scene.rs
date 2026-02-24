@@ -87,6 +87,8 @@ pub struct RenderItem {
     /// Number of descendant items that follow this one in the list.
     /// Used by Canvas 2D renderer for clip region management.
     pub descendant_count: usize,
+    /// If true, this item acts as a mask — its shape clips subsequent siblings.
+    pub is_mask: bool,
 }
 
 /// The renderable shape — derived from NodeKind.
@@ -281,7 +283,7 @@ fn build_scene_recursive(
                 height: node.height,
                 corner_radii: figma_engine::node::CornerRadii::default(),
             },
-            true,
+            true, // clip children like a frame
         ),
         NodeKind::Instance { .. } => (
             RenderShape::Rect {
@@ -289,7 +291,7 @@ fn build_scene_recursive(
                 height: node.height,
                 corner_radii: figma_engine::node::CornerRadii::default(),
             },
-            true,
+            true, // clip children like a frame
         ),
         NodeKind::Image { data, image_width, image_height } => (
             RenderShape::Image {
@@ -317,6 +319,7 @@ fn build_scene_recursive(
         z_index: z,
         clips,
         descendant_count: 0,
+        is_mask: node.is_mask,
     });
 
     // Recurse into children

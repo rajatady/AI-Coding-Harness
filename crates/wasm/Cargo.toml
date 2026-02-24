@@ -30,4 +30,5 @@ features = [
     "CanvasWindingRule",
     "Document",
     "Window",
+    "TextMetrics",
 ]

@@ -8,6 +8,7 @@ use figma_engine::node::*;
 use figma_engine::properties::*;
 use figma_engine::id::NodeId;
 use figma_engine::document::Document;
+use figma_engine::layout::compute_layout;
 use glam::Vec2;
 use serde_json::Value;
 
@@ -64,6 +65,56 @@ pub fn import_fig_json(doc: &mut Document, json_str: &str, image_base: &str) -> 
                 result.nodes_imported += count;
             }
         }
+
+        // Apply auto-layout computation to position children correctly
+        let page = doc.page_mut(page_idx).unwrap();
+        let root = page.tree.root_id();
+        compute_layout(&mut page.tree, &root);
+    }
+
+    result
+}
+
+/// Import from a pre-parsed serde_json::Value tree directly (no string round-trip).
+/// The `document` Value should have the same structure as fig2json output:
+/// {"children": [page1, page2, ...]} where each page has {"name":"...", "children":[...]}.
+pub fn import_fig_value(doc: &mut Document, document: &Value, image_base: &str) -> ImportResult {
+    let mut result = ImportResult {
+        pages_imported: 0,
+        nodes_imported: 0,
+        errors: Vec::new(),
+        has_image_fills: false,
+    };
+
+    let pages = match document.get("children").and_then(|c| c.as_array()) {
+        Some(p) => p,
+        None => {
+            result.errors.push("No children[] found in document value".into());
+            return result;
+        }
+    };
+
+    for page_val in pages {
+        let page_name = page_val.get("name")
+            .and_then(|n| n.as_str())
+            .unwrap_or("Imported Page");
+
+        let _page_id = doc.add_page(page_name);
+        let page_idx = doc.pages.len() - 1;
+        let tree_root = doc.page(page_idx).unwrap().tree.root_id();
+        result.pages_imported += 1;
+
+        if let Some(children) = page_val.get("children").and_then(|c| c.as_array()) {
+            for child_val in children {
+                let count = import_node(doc, page_idx, tree_root, child_val, image_base, &mut result);
+                result.nodes_imported += count;
+            }
+        }
+
+        // Apply auto-layout computation to position children correctly
+        let page = doc.page_mut(page_idx).unwrap();
+        let root = page.tree.root_id();
+        compute_layout(&mut page.tree, &root);
     }
 
     result
@@ -104,6 +155,11 @@ pub fn import_fig_page_json(doc: &mut Document, page_json: &str, image_base: &st
         }
     }
 
+    // Apply auto-layout computation to position children correctly
+    let page = doc.page_mut(page_idx).unwrap();
+    let root = page.tree.root_id();
+    compute_layout(&mut page.tree, &root);
+
     result
 }
 
@@ -119,12 +175,9 @@ fn import_node(
     let errors = &mut result.errors;
     let name = val.get("name").and_then(|n| n.as_str()).unwrap_or("unnamed");
 
-    // Skip mask nodes — they define clipping paths, not visible shapes.
-    // Rendering them fills the screen with black rectangles.
+    // Mask nodes define clipping paths for subsequent siblings.
+    // The renderer handles is_mask by using the shape as a clip path (canvas2d.rs).
     let is_mask = val.get("mask").and_then(|v| v.as_bool()).unwrap_or(false);
-    if is_mask {
-        return 0;
-    }
 
     // Skip invisible nodes early (but still count them)
     let visible = val.get("visible").and_then(|v| v.as_bool()).unwrap_or(true);
@@ -139,15 +192,27 @@ fn import_node(
 
     let id = doc.next_id();
     let mut node = if has_children {
-        // Frame/group — only clip if the Figma node explicitly requests it
+        // Frame/group — clip based on Figma defaults
         let corner_radii = get_corner_radii(val);
         let auto_layout = get_auto_layout(val);
-        let explicit_clip = val.get("clipsContent").and_then(|v| v.as_bool()).unwrap_or(false);
-        // Also clip if any child is a mask (Clipped groups have a mask child defining clip bounds)
+        // In Figma, frames clip by default, groups don't.
+        // Heuristic: if node has visual properties (fill/stroke/corners/auto-layout),
+        // it's a frame → default clip=true. Plain containers are groups → clip=false.
+        // html.to.design exports have no `clipsContent` field (fig2json strips defaults).
+        // In Figma, frames default to clip=true, groups to clip=false.
+        // Without a reliable type field, we default ALL containers to clip=true.
+        // This matches Figma behavior for frames (the majority case) and prevents
+        // overflow artifacts from carousel arrows, navigation chevrons, etc.
+        // Groups that shouldn't clip are rare and the visual impact is minimal
+        // (their children are typically within bounds anyway).
+        let default_clip = true;
+        let explicit_clip = val.get("clipsContent").and_then(|v| v.as_bool());
+        let clip_from_field = explicit_clip.unwrap_or(default_clip);
+        // Also clip if any child is a mask — the mask defines a clipping region
         let has_mask_child = val.get("children").and_then(|c| c.as_array()).map_or(false, |children| {
             children.iter().any(|child| child.get("mask").and_then(|v| v.as_bool()).unwrap_or(false))
         });
-        let clip_content = explicit_clip || has_mask_child;
+        let clip_content = clip_from_field || has_mask_child;
         let mut n = Node::frame(id, name, w, h);
         n.kind = NodeKind::Frame {
             clip_content,
@@ -191,9 +256,10 @@ fn import_node(
     // Apply transform (translation + rotation + scale)
     node.transform = node_transform;
 
-    // Apply visibility and locked
+    // Apply visibility, locked, and mask flag
     node.visible = visible;
     node.locked = val.get("locked").and_then(|v| v.as_bool()).unwrap_or(false);
+    node.is_mask = is_mask;
 
     // Apply style
     node.style.opacity = val.get("opacity").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
@@ -466,7 +532,8 @@ fn parse_paint(paint: &Value, image_base: &str) -> Option<Paint> {
 
 /// Parse gradient transform from fig2json format into start/end points.
 /// Transform has: x, y (normalized origin), rotation (degrees), scaleX, scaleY.
-/// The gradient line goes from the transform origin in the direction of rotation.
+/// The gradient line goes from the transform origin in the direction of rotation,
+/// scaled by scaleX (length of gradient line in normalized [0,1] space).
 fn parse_gradient_transform(paint: &Value) -> (Vec2, Vec2) {
     let t = match paint.get("transform") {
         Some(t) => t,
@@ -476,11 +543,12 @@ fn parse_gradient_transform(paint: &Value) -> (Vec2, Vec2) {
     let x = t.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
     let y = t.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
     let rotation = t.get("rotation").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+    let scale_x = t.get("scaleX").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
 
-    // Convert rotation degrees to radians, compute direction
+    // Convert rotation degrees to radians, compute direction scaled by gradient length
     let rad = rotation.to_radians();
-    let dx = rad.cos();
-    let dy = rad.sin();
+    let dx = rad.cos() * scale_x;
+    let dy = rad.sin() * scale_x;
 
     // Start at (x, y), end at (x + dx, y + dy) in normalized [0,1] space
     let start = Vec2::new(x, y);
@@ -528,9 +596,14 @@ fn get_text_data(val: &Value) -> (Vec<TextRun>, TextAlign) {
         .and_then(|fn_val| fn_val.get("style"))
         .and_then(|s| s.as_str())
         .unwrap_or("Regular");
-    let font_weight = if font_style.contains("Bold") { 700 }
+    let font_weight = if font_style.contains("Black") { 900 }
+        else if font_style.contains("ExtraBold") || font_style.contains("UltraBold") { 800 }
+        else if font_style.contains("Bold") { 700 }
+        else if font_style.contains("SemiBold") || font_style.contains("Semibold") || font_style.contains("DemiBold") { 600 }
         else if font_style.contains("Medium") { 500 }
+        else if font_style.contains("Light") && font_style.contains("Extra") { 200 }
         else if font_style.contains("Light") { 300 }
+        else if font_style.contains("Thin") || font_style.contains("Hairline") { 100 }
         else { 400 };
     let italic = font_style.contains("Italic");
 

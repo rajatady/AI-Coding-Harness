@@ -19,7 +19,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const puppeteer = (await import('puppeteer')).default;
 
-const PORT = 3099;
+const PORT = 3000;
 const BASE_URL = `http://localhost:${PORT}`;
 
 const vite = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], {

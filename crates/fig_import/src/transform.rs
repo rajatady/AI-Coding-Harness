@@ -98,12 +98,28 @@ fn transform_matrix(map: &mut serde_json::Map<String, JsonValue>) {
             let scale_x = (m00 * m00 + m10 * m10).sqrt();
             let scale_y = (m01 * m01 + m11 * m11).sqrt();
 
+            // Extract skew: shear angle from the matrix
+            let skew_x = if scale_x.abs() > 1e-6 {
+                (m01 * m00 + m11 * m10).atan2(scale_x * scale_x).to_degrees()
+            } else {
+                0.0
+            };
+
             let mut css = serde_json::Map::new();
             css.insert("x".into(), json_f64(x));
             css.insert("y".into(), json_f64(y));
-            css.insert("rotation".into(), json_f64(rotation));
-            css.insert("scaleX".into(), json_f64(scale_x));
-            css.insert("scaleY".into(), json_f64(scale_y));
+            if rotation.abs() > 1e-6 {
+                css.insert("rotation".into(), json_f64(rotation));
+            }
+            if (scale_x - 1.0).abs() > 1e-6 {
+                css.insert("scaleX".into(), json_f64(scale_x));
+            }
+            if (scale_y - 1.0).abs() > 1e-6 {
+                css.insert("scaleY".into(), json_f64(scale_y));
+            }
+            if skew_x.abs() > 1e-6 {
+                css.insert("skewX".into(), json_f64(skew_x));
+            }
 
             map.insert("transform".into(), JsonValue::Object(css));
         }

@@ -66,7 +66,7 @@ What's left: masks, component flattening, auto-layout computation. Use `./ide co
 
 ## PLAYWRIGHT STRESS TEST (2-minute protocol)
 How to verify in the real browser with Playwright MCP:
-1. Start dev server: `cd app && npx vite` (port 3099)
+1. Start dev server: `cd app && npx vite` (port 3000)
 2. Navigate: `browser_navigate` to http://localhost:3000
 3. Wait for load: `browser_wait_for` "Stress test:" text in console
 4. Test operations via `browser_evaluate`:

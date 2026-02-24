@@ -222,6 +222,9 @@ pub struct Node {
     // Figma-style constraints: how child responds to parent resize
     pub constraint_horizontal: ConstraintType,
     pub constraint_vertical: ConstraintType,
+
+    /// If true, this node acts as a mask for its subsequent siblings.
+    pub is_mask: bool,
 }
 
 impl Node {
@@ -245,6 +248,7 @@ impl Node {
             vertical_sizing: SizingMode::Fixed,
             constraint_horizontal: ConstraintType::Min,
             constraint_vertical: ConstraintType::Min,
+            is_mask: false,
         }
     }
 
@@ -266,6 +270,7 @@ impl Node {
             vertical_sizing: SizingMode::Fixed,
             constraint_horizontal: ConstraintType::Min,
             constraint_vertical: ConstraintType::Min,
+            is_mask: false,
         }
     }
 
@@ -288,6 +293,7 @@ impl Node {
             vertical_sizing: SizingMode::Fixed,
             constraint_horizontal: ConstraintType::Min,
             constraint_vertical: ConstraintType::Min,
+            is_mask: false,
         }
     }
 
@@ -320,6 +326,7 @@ impl Node {
             vertical_sizing: SizingMode::Fixed,
             constraint_horizontal: ConstraintType::Min,
             constraint_vertical: ConstraintType::Min,
+            is_mask: false,
         }
     }
 
@@ -338,6 +345,7 @@ impl Node {
             vertical_sizing: SizingMode::Fixed,
             constraint_horizontal: ConstraintType::Min,
             constraint_vertical: ConstraintType::Min,
+            is_mask: false,
         }
     }
 
@@ -359,6 +367,7 @@ impl Node {
             vertical_sizing: SizingMode::Fixed,
             constraint_horizontal: ConstraintType::Min,
             constraint_vertical: ConstraintType::Min,
+            is_mask: false,
         }
     }
 
@@ -381,6 +390,7 @@ impl Node {
             vertical_sizing: SizingMode::Fixed,
             constraint_horizontal: ConstraintType::Min,
             constraint_vertical: ConstraintType::Min,
+            is_mask: false,
         }
     }
 
