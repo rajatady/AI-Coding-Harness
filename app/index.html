@@ -10,52 +10,213 @@
 </head>
 <body>
     <div id="app">
+        <!-- Title Bar (48px macOS-style) -->
+        <div id="title-bar">
+            <div class="tb-left">
+                <div class="tb-file-info">
+                    <div class="tb-file-icon" id="tb-file-icon">C</div>
+                    <span class="tb-file-name">Canvas</span>
+                </div>
+                <div class="tb-sep"></div>
+                <!-- Page selector -->
+                <div class="tb-dropdown" id="tb-page-selector">
+                    <button class="tb-dropdown-btn" id="tb-page-btn">
+                        <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M3.5 1.5H8L10.5 4V11.5H3.5V1.5Z" stroke="currentColor" stroke-width="0.9" stroke-linejoin="round"/><path d="M8 1.5V4H10.5" stroke="currentColor" stroke-width="0.9" stroke-linejoin="round"/></svg>
+                        <span class="tb-page-label-text" id="tb-page-label">Page 1</span>
+                        <svg class="tb-chev" width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M2 3L4 5.2L6 3" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                    <div class="tb-dropdown-menu" id="tb-page-menu"></div>
+                </div>
+                <div class="tb-sep"></div>
+                <!-- View menu -->
+                <div class="tb-dropdown" id="tb-view-dropdown">
+                    <button class="tb-dropdown-btn" id="tb-view-btn">
+                        View
+                        <svg class="tb-chev" width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M2 3L4 5.2L6 3" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                    <div class="tb-dropdown-menu" id="tb-view-menu"></div>
+                </div>
+            </div>
+
+            <!-- Center: Design/AI mode toggle -->
+            <div class="tb-center">
+                <div class="tb-mode-pill" id="tb-mode-pill">
+                    <div class="tb-mode-slider" id="tb-mode-slider"></div>
+                    <button class="tb-mode-btn active" id="tb-mode-design" data-mode="design">
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 1.5L11.5 7L7.5 8L5.8 12L3 1.5Z" stroke="currentColor" stroke-width="1.05" stroke-linejoin="round"/></svg>
+                        Design
+                    </button>
+                    <button class="tb-mode-btn" id="tb-mode-ai" data-mode="ai">
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1L8.2 5.5L12.5 7L8.2 8.5L7 13L5.8 8.5L1.5 7L5.8 5.5L7 1Z" fill="currentColor" stroke="currentColor" stroke-width="0.5" stroke-linejoin="round"/></svg>
+                        AI
+                    </button>
+                </div>
+            </div>
+
+            <div class="tb-right">
+                <!-- Zoom controls -->
+                <div class="tb-zoom">
+                    <button class="tb-zoom-btn" id="tb-zoom-out">
+                        <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 5.5H9" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
+                    </button>
+                    <span class="tb-zoom-val" id="tb-zoom-val">100%</span>
+                    <button class="tb-zoom-btn" id="tb-zoom-in">
+                        <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 2V9M2 5.5H9" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
+                    </button>
+                </div>
+                <div class="tb-sep"></div>
+                <button class="tb-share-btn">Share</button>
+                <div class="tb-avatars">
+                    <div class="tb-avatar" style="background:#8E8E93">K</div>
+                    <div class="tb-avatar" style="background:#636366">A</div>
+                    <div class="tb-avatar" style="background:#48484A">R</div>
+                </div>
+            </div>
+        </div>
+
         <div id="workspace">
-            <div id="layers-panel" class="panel panel-left">
-                <div id="pages-section">
+            <!-- Left Panel: Tabbed Pages / Layers / Assets -->
+            <div id="layers-panel" class="panel panel-left collapsed">
+                <div class="left-panel-tabs">
+                    <div class="left-panel-pill">
+                        <div class="left-panel-pill-slider" id="left-pill-slider"></div>
+                        <button class="left-panel-tab active" data-ltab="pages">Pages</button>
+                        <button class="left-panel-tab" data-ltab="layers">Layers</button>
+                        <button class="left-panel-tab" data-ltab="assets">Assets</button>
+                    </div>
+                </div>
+                <div id="pages-section" class="left-tab-content">
                     <div class="section-header" id="pages-header">
-                        <span class="section-title">Pages</span>
-                        <span class="section-action" id="add-page-btn">+</span>
+                        <span class="section-action" id="add-page-btn">+ New Page</span>
                     </div>
                     <div id="page-list"></div>
                 </div>
-                <div id="layers-section">
-                    <div class="section-header" id="layers-header">
-                        <span class="section-title">Layers</span>
-                    </div>
+                <div id="layers-section" class="left-tab-content" style="display:none">
                     <div id="layers-list"></div>
                 </div>
+                <div id="assets-section" class="left-tab-content" style="display:none">
+                    <div id="assets-list" class="assets-list"></div>
+                </div>
             </div>
-            <canvas id="canvas"></canvas>
-            <div id="properties-panel" class="panel panel-right">
-                <div class="panel-header">Properties</div>
-                <div id="properties-content"></div>
+
+            <!-- Canvas Area (relative container for floating elements) -->
+            <div id="canvas-area">
+                <canvas id="canvas"></canvas>
+
+                <!-- Layers toggle button (floating on canvas) -->
+                <button id="layers-toggle" class="canvas-float-btn" title="Toggle Layers (⌘1)">
+                    <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1.5L12 4.5L6.5 7.5L1 4.5L6.5 1.5Z" stroke="currentColor" stroke-width="0.9"/><path d="M1 7.5L6.5 10.5L12 7.5" stroke="currentColor" stroke-width="0.9"/></svg>
+                </button>
+
+                <!-- Floating Toolbar (top center over canvas) -->
+                <div id="toolbar">
+                    <div class="tool-group">
+                        <button class="tool-btn" data-action="add-frame" title="Frame (F)">
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3.5 1V3.5M10.5 1V3.5M3.5 10.5V13M10.5 10.5V13M1 3.5H3.5M1 10.5H3.5M10.5 3.5H13M10.5 10.5H13" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><rect x="3.5" y="3.5" width="7" height="7" rx="0.5" stroke="currentColor" stroke-width="1"/></svg>
+                        </button>
+                        <button class="tool-btn" data-action="add-rect" title="Rectangle (R)">
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="2" y="3" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1"/></svg>
+                        </button>
+                        <button class="tool-btn" data-action="add-ellipse" title="Ellipse (O)">
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><ellipse cx="7" cy="7" rx="5" ry="4" stroke="currentColor" stroke-width="1"/></svg>
+                        </button>
+                        <button class="tool-btn" data-action="add-text" title="Text (T)">
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3.5 3H10.5M7 3V11.5M5 11.5H9" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
+                        </button>
+                        <button class="tool-btn" data-action="add-star" title="Star (S)">
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1L8.5 5H12.5L9.5 7.5L10.5 12L7 9.5L3.5 12L4.5 7.5L1.5 5H5.5L7 1Z" stroke="currentColor" stroke-width="0.9" stroke-linejoin="round"/></svg>
+                        </button>
+                        <button class="tool-btn" data-action="add-polygon" title="Polygon">
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5L12.5 5.5L10.5 11.5H3.5L1.5 5.5L7 1.5Z" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/></svg>
+                        </button>
+                        <button class="tool-btn" data-action="pen" title="Pen (P)">
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 12L3.5 6.5L10 2L11.5 3.5L6 10L2 12Z" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/></svg>
+                        </button>
+                    </div>
+                    <div class="tool-separator"></div>
+                    <div class="tool-group">
+                        <button class="tool-btn" data-action="delete" title="Delete (⌫)">
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 4H11M5 4V3C5 2.4 5.4 2 6 2H8C8.6 2 9 2.4 9 3V4M6 6.5V10M8 6.5V10" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><path d="M3.5 4L4 11.5C4 12 4.4 12.5 5 12.5H9C9.6 12.5 10 12 10 11.5L10.5 4" stroke="currentColor" stroke-width="1"/></svg>
+                        </button>
+                        <button class="tool-btn" data-action="add-image" title="Image">
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1.5" y="1.5" width="11" height="11" rx="1.5" stroke="currentColor" stroke-width="0.9"/><circle cx="5" cy="5" r="1.2" stroke="currentColor" stroke-width="0.8"/><path d="M1.5 10L4.5 7L7 9.5L9 7.5L12.5 10" stroke="currentColor" stroke-width="0.8"/></svg>
+                        </button>
+                    </div>
+                    <div class="tool-separator"></div>
+                    <div class="tool-group">
+                        <button class="tool-btn tool-btn-secondary" data-action="export-png" title="Export PNG">
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5V8.5M4.5 4L7 1.5L9.5 4" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 8.5V11.5H12V8.5" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        </button>
+                        <button class="tool-btn tool-btn-secondary" data-action="export-svg" title="Export SVG">
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 4.5C2 3 3 2 4.5 2C6 2 6.5 3 6.5 3" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><path d="M7 7L5 11.5L7 10L9 11.5L7 7Z" stroke="currentColor" stroke-width="0.9" stroke-linejoin="round"/><path d="M12 4.5C12 3 11 2 9.5 2" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
+                        </button>
+                        <button class="tool-btn tool-btn-secondary" data-action="import-fig" title="Import .fig">
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 8.5V1.5M4.5 6L7 8.5L9.5 6" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 8.5V11.5H12V8.5" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        </button>
+                    </div>
+                    <!-- AI wand button in toolbar -->
+                    <div class="tool-separator"></div>
+                    <button class="tool-btn tool-btn-ai" id="toolbar-ai-btn" data-action="toggle-ai" title="Toggle AI Mode">
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1L8.2 5.5L12.5 7L8.2 8.5L7 13L5.8 8.5L1.5 7L5.8 5.5L7 1Z" fill="currentColor" stroke="currentColor" stroke-width="0.5" stroke-linejoin="round"/></svg>
+                    </button>
+                    <input type="file" id="image-file-input" accept="image/*" style="display:none" />
+                    <input type="file" id="fig-file-input" accept=".json,.fig" style="display:none" />
+                </div>
+
+                <!-- Floating Inspector (right side, absolute) -->
+                <div id="properties-panel" class="floating-inspector hidden">
+                    <div class="inspector-header" id="inspector-header">
+                        <div class="inspector-header-left">
+                            <span class="inspector-type-icon" id="inspector-type-icon"></span>
+                            <span class="inspector-title" id="inspector-title">Properties</span>
+                        </div>
+                        <button class="inspector-close" id="inspector-close">&times;</button>
+                    </div>
+                    <!-- Pill tabs: Design / Layout -->
+                    <div class="inspector-tabs">
+                        <div class="inspector-pill" id="inspector-pill">
+                            <div class="inspector-pill-slider" id="inspector-pill-slider"></div>
+                            <button class="inspector-pill-btn active" data-tab="design">Design</button>
+                            <button class="inspector-pill-btn" data-tab="layout">Layout</button>
+                        </div>
+                    </div>
+                    <div id="properties-content"></div>
+                </div>
+
+                <!-- AI Chat Panel (right side, shown in AI mode) -->
+                <div id="ai-panel" class="ai-panel hidden">
+                    <div class="ai-panel-header">
+                        <div class="ai-panel-header-icon">
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1L8.2 5.5L12.5 7L8.2 8.5L7 13L5.8 8.5L1.5 7L5.8 5.5L7 1Z" fill="currentColor" stroke="currentColor" stroke-width="0.5" stroke-linejoin="round"/></svg>
+                        </div>
+                        <div class="ai-panel-header-text">
+                            <div class="ai-panel-title">Canvas AI</div>
+                            <div class="ai-panel-sub">Describe changes in natural language</div>
+                        </div>
+                    </div>
+                    <div class="ai-messages" id="ai-messages"></div>
+                    <div class="ai-quick-actions" id="ai-quick-actions">
+                        <button class="ai-quick-btn">Add a section</button>
+                        <button class="ai-quick-btn">Change colors</button>
+                        <button class="ai-quick-btn">Resize artboard</button>
+                        <button class="ai-quick-btn">Generate copy</button>
+                    </div>
+                    <div class="ai-input-area">
+                        <div class="ai-input-wrap">
+                            <span class="ai-input-icon">
+                                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1L8.2 5.5L12.5 7L8.2 8.5L7 13L5.8 8.5L1.5 7L5.8 5.5L7 1Z" stroke="currentColor" stroke-width="0.9" stroke-linejoin="round"/></svg>
+                            </span>
+                            <input id="ai-input" placeholder="Describe what you'd like to change..." />
+                            <button class="ai-send-btn" id="ai-send-btn">
+                                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 7H10M10 7L6.5 3.5M10 7L6.5 10.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
-        <div id="toolbar">
-            <div class="tool-group">
-                <button class="tool-btn" data-action="add-frame" title="Frame (F)">Frame</button>
-                <button class="tool-btn" data-action="add-rect" title="Rectangle (R)">Rect</button>
-                <button class="tool-btn" data-action="add-ellipse" title="Ellipse (O)">Ellipse</button>
-                <button class="tool-btn" data-action="add-text" title="Text (T)">Text</button>
-                <button class="tool-btn" data-action="add-star" title="Star (S)">Star</button>
-                <button class="tool-btn" data-action="add-polygon" title="Polygon">Poly</button>
-                <button class="tool-btn" data-action="pen" title="Pen (P)">Pen</button>
-            </div>
-            <div class="tool-separator"></div>
-            <div class="tool-group">
-                <button class="tool-btn" data-action="delete" title="Delete (⌫)">Del</button>
-                <button class="tool-btn" data-action="add-image" title="Image">Img</button>
-            </div>
-            <div class="tool-separator"></div>
-            <div class="tool-group">
-                <button class="tool-btn tool-btn-secondary" data-action="export-png">PNG</button>
-                <button class="tool-btn tool-btn-secondary" data-action="export-svg">SVG</button>
-                <button class="tool-btn tool-btn-secondary" data-action="import-fig">Import</button>
-            </div>
-            <input type="file" id="image-file-input" accept="image/*" style="display:none" />
-            <input type="file" id="fig-file-input" accept=".json,.fig" style="display:none" />
-        </div>
+
+        <!-- Status Bar (floating bottom-center) -->
         <div id="status-bar">
             <span id="info">Loading...</span>
             <span id="coords"></span>

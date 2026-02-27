@@ -21,6 +21,45 @@ const pageList = document.getElementById('page-list')!;
 const addPageBtn = document.getElementById('add-page-btn')!;
 const propertiesContent = document.getElementById('properties-content')!;
 
+// ─── Title bar elements ───
+const tbPageBtn = document.getElementById('tb-page-btn')!;
+const tbPageMenu = document.getElementById('tb-page-menu')!;
+const tbPageLabel = document.getElementById('tb-page-label')!;
+const tbViewBtn = document.getElementById('tb-view-btn')!;
+const tbViewMenu = document.getElementById('tb-view-menu')!;
+const tbModePill = document.getElementById('tb-mode-pill')!;
+const tbModeDesign = document.getElementById('tb-mode-design')!;
+const tbModeAi = document.getElementById('tb-mode-ai')!;
+const tbModeSlider = document.getElementById('tb-mode-slider')!;
+const tbZoomVal = document.getElementById('tb-zoom-val')!;
+const tbZoomIn = document.getElementById('tb-zoom-in')!;
+const tbZoomOut = document.getElementById('tb-zoom-out')!;
+// (removed tb-file-sub — page name only shown in page selector)
+
+// ─── Floating inspector elements ───
+const inspectorPanel = document.getElementById('properties-panel')!;
+const inspectorClose = document.getElementById('inspector-close')!;
+const inspectorTitle = document.getElementById('inspector-title')!;
+const inspectorTypeIcon = document.getElementById('inspector-type-icon')!;
+const inspectorPillSlider = document.getElementById('inspector-pill-slider')!;
+const inspectorPillBtns = document.querySelectorAll('.inspector-pill-btn');
+
+// ─── Layers toggle ───
+const layersPanel = document.getElementById('layers-panel')!;
+const layersToggle = document.getElementById('layers-toggle')!;
+
+// ─── AI panel elements ───
+const aiPanel = document.getElementById('ai-panel')!;
+const aiMessages = document.getElementById('ai-messages')!;
+const aiInput = document.getElementById('ai-input') as HTMLInputElement;
+const aiSendBtn = document.getElementById('ai-send-btn')!;
+const toolbarAiBtn = document.getElementById('toolbar-ai-btn')!;
+
+// ─── App mode state ───
+let appMode: 'design' | 'ai' = 'design';
+let showInspector = true;
+let inspectorTab: 'design' | 'layout' = 'design';
+
 // ─── Canvas sizing (DPR-aware for crisp Retina rendering) ───────────
 
 const dpr = window.devicePixelRatio || 1;
@@ -28,9 +67,9 @@ let cssW = 0;
 let cssH = 0;
 
 function resize(): void {
-    const workspace = document.getElementById('workspace')!;
-    cssW = workspace.clientWidth - 480; // minus two panels
-    cssH = workspace.clientHeight;
+    const canvasArea = document.getElementById('canvas-area')!;
+    cssW = canvasArea.clientWidth;
+    cssH = canvasArea.clientHeight;
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
     canvas.style.width = cssW + 'px';
@@ -720,6 +759,9 @@ function render(forceLayerUpdate = false): void {
     const groupText = eg[0] >= 0 ? ' | Inside Group (Esc to exit)' : '';
     info.textContent = `${app.node_count()} nodes | ${ms.toFixed(1)}ms (~${fps}fps) [${renderer}]${selText}${snapText}${groupText}`;
 
+    // Update title bar zoom
+    updateZoomDisplay();
+
     // Defer panel updates to avoid blocking render loop.
     // Panels are expensive with large trees (100K+ nodes) — update after render settles.
     const selChanged = selCounter !== lastSelCounter || selClient !== lastSelClient;
@@ -730,6 +772,7 @@ function render(forceLayerUpdate = false): void {
         panelUpdateTimer = requestAnimationFrame(() => {
             updateLayersPanel();
             updatePropertiesPanel();
+            if (selChanged) showInspectorForSelection();
             layersDirty = false;
             panelUpdateTimer = 0;
         });
@@ -1325,14 +1368,14 @@ const SHORTCUTS: Shortcut[] = [
     { key: 'v', action: () => { setCursor('default'); }, label: 'Select', category: 'tools', when: notInput },
 
     // ── Edit ──
-    { key: 'Delete', action: () => { app.delete_selected(); }, label: 'Delete', category: 'edit' },
-    { key: 'Backspace', action: () => { app.delete_selected(); }, label: 'Delete', category: 'edit' },
+    { key: 'Delete', action: () => { app.delete_selected(); layersDirty = true; }, label: 'Delete', category: 'edit' },
+    { key: 'Backspace', action: () => { app.delete_selected(); layersDirty = true; }, label: 'Delete', category: 'edit' },
     { key: 'z', modifiers: ['meta'], action: () => { app.undo(); layersDirty = true; }, label: 'Undo', category: 'edit' },
     { key: 'z', modifiers: ['meta', 'shift'], action: () => { app.redo(); layersDirty = true; }, label: 'Redo', category: 'edit' },
     { key: 'c', modifiers: ['meta'], action: () => { app.copy_selected(); }, label: 'Copy', category: 'edit' },
     { key: 'v', modifiers: ['meta'], action: () => { app.paste(); layersDirty = true; }, label: 'Paste', category: 'edit' },
     { key: 'd', modifiers: ['meta'], action: () => { app.duplicate_selected(); layersDirty = true; }, label: 'Duplicate', category: 'edit' },
-    { key: 'a', modifiers: ['meta'], action: () => { app.select_all(); }, label: 'Select All', category: 'edit' },
+    { key: 'a', modifiers: ['meta'], action: () => { app.select_all(); layersDirty = true; }, label: 'Select All', category: 'edit' },
     { key: 'g', modifiers: ['meta'], action: () => { app.group_selected(); layersDirty = true; }, label: 'Group', category: 'edit' },
     { key: 'g', modifiers: ['meta', 'shift'], action: () => { app.ungroup_selected(); layersDirty = true; }, label: 'Ungroup', category: 'edit' },
 
@@ -1342,10 +1385,13 @@ const SHORTCUTS: Shortcut[] = [
     { key: 'r', modifiers: ['meta', 'shift'], action: () => { showRulers = !showRulers; }, label: 'Toggle Rulers', category: 'view' },
     { key: "'", modifiers: ['meta'], action: () => { const c = app.get_snap_grid(); app.set_snap_grid(c > 0 ? 0 : 8); }, label: 'Toggle Grid Snap', category: 'view' },
     { key: '?', modifiers: ['shift'], action: () => { toggleHelpDialog(); }, label: 'Keyboard Shortcuts', category: 'view' },
+    { key: '1', modifiers: ['meta'], action: () => { toggleLayers(); }, label: 'Toggle Layers', category: 'view' },
 
     // ── Arrange ──
-    { key: ']', modifiers: ['meta'], action: () => { app.bring_to_front(); }, label: 'Bring to Front', category: 'arrange' },
-    { key: '[', modifiers: ['meta'], action: () => { app.send_to_back(); }, label: 'Send to Back', category: 'arrange' },
+    { key: ']', modifiers: ['meta'], action: () => { app.bring_to_front(); layersDirty = true; }, label: 'Bring to Front', category: 'arrange' },
+    { key: '[', modifiers: ['meta'], action: () => { app.send_to_back(); layersDirty = true; }, label: 'Send to Back', category: 'arrange' },
+    { key: ']', action: () => { app.bring_forward(); layersDirty = true; }, label: 'Bring Forward', category: 'arrange', when: notInput },
+    { key: '[', action: () => { app.send_backward(); layersDirty = true; }, label: 'Send Backward', category: 'arrange', when: notInput },
 
     // ── Boolean ──
     { key: 'u', modifiers: ['meta', 'shift'], action: () => { app.boolean_op(0); layersDirty = true; }, label: 'Union', category: 'boolean' },
@@ -1406,7 +1452,12 @@ function formatShortcutKey(s: Shortcut): string {
 window.addEventListener('keydown', (e: KeyboardEvent) => {
     // Special: Escape (multi-behavior)
     if (e.key === 'Escape') {
+        // Close dropdowns first
+        const menusOpen = tbPageMenu.classList.contains('open') || tbViewMenu.classList.contains('open');
+        if (menusOpen) { tbPageMenu.classList.remove('open'); tbViewMenu.classList.remove('open'); return; }
         if (helpDialogVisible) { toggleHelpDialog(); return; }
+        // Exit AI mode
+        if (appMode === 'ai') { setAppMode('design'); return; }
         if (app.is_creating()) { app.cancel_creating(); setCursor('default'); render(); return; }
         if (app.pen_is_active()) { app.pen_cancel(); setCursor('default'); render(); return; }
         if (app.is_vector_editing()) { app.vector_edit_exit(); render(); return; }
@@ -1584,7 +1635,8 @@ document.addEventListener('mousedown', (e: MouseEvent) => {
 // ─── Toolbar ─────────────────────────────────────────────────────────
 
 document.getElementById('toolbar')!.addEventListener('click', (e: Event) => {
-    const target = e.target as HTMLElement;
+    const target = (e.target as HTMLElement).closest('[data-action]') as HTMLElement;
+    if (!target) return;
     const action = target.dataset['action'];
     if (!action) return;
 
@@ -1660,6 +1712,10 @@ document.getElementById('toolbar')!.addEventListener('click', (e: Event) => {
         }
         case 'import-fig': {
             (document.getElementById('fig-file-input') as HTMLInputElement).click();
+            return;
+        }
+        case 'toggle-ai': {
+            // Handled by separate listener
             return;
         }
     }
@@ -1954,8 +2010,9 @@ const LAYER_ROW_HEIGHT = 28; // px per row
 const LAYER_OVERSCAN = 10;   // extra rows above/below viewport
 const LAYER_INDENT = 16;     // px indent per depth level
 
-// Node type icons (compact)
+// Node type icons (compact) + colors matching 3.jsx
 const KIND_ICONS = ['▣', '■', '●', 'T', '✎', '🖼', '⊕', '◇']; // frame, rect, ellipse, text, vector, image, boolean, other
+const KIND_COLORS = ['#0A84FF', '#9d9da5', '#9d9da5', '#BF5AF2', '#FF9F0A', '#30D158', '#5E5CE6', '#9d9da5'];
 
 // Create virtual scroll structure: spacer + visible container
 const layersSpacer = document.createElement('div');
@@ -2037,7 +2094,8 @@ function renderVisibleLayers(): void {
         const arrow = hasChildren ? (isExpanded ? '▾' : '▸') : '  ';
         const name = app.get_node_name(counter, client);
 
-        html += `<div class="layer-item${isSelected ? ' selected' : ''}" data-counter="${counter}" data-client="${client}" data-has-children="${hasChildren ? 1 : 0}" style="position:absolute;top:${top}px;left:0;right:0;height:${LAYER_ROW_HEIGHT}px;line-height:${LAYER_ROW_HEIGHT}px;padding-left:${indent}px"><span class="layer-arrow" style="cursor:pointer;width:14px;display:inline-block;opacity:${hasChildren ? 1 : 0.3}">${arrow}</span><span class="layer-icon" style="margin-right:4px;opacity:0.6">${icon}</span>${name}</div>`;
+        const iconColor = KIND_COLORS[kind] || '#9d9da5';
+        html += `<div class="layer-item${isSelected ? ' selected' : ''}" data-counter="${counter}" data-client="${client}" data-has-children="${hasChildren ? 1 : 0}" style="position:absolute;top:${top}px;left:0;right:0;height:${LAYER_ROW_HEIGHT}px;line-height:${LAYER_ROW_HEIGHT}px;padding-left:${indent}px"><span class="layer-arrow" style="cursor:pointer;width:14px;display:inline-block;opacity:${hasChildren ? 1 : 0.3}">${arrow}</span><span class="layer-icon" style="margin-right:4px;color:${iconColor}">${icon}</span>${name}</div>`;
     }
     layersViewport.innerHTML = html;
     lastLayerScrollTop = scrollTop;
@@ -2102,6 +2160,8 @@ function updatePageList(): void {
         html += `<div class="page-item${p.index === current ? ' active' : ''}" data-page="${p.index}">${p.name}</div>`;
     }
     pageList.innerHTML = html;
+    // Sync title bar page selector
+    if (typeof updateTitleBarPage === 'function') updateTitleBarPage();
 }
 
 // Add page button in section header
@@ -2126,6 +2186,376 @@ pageList.addEventListener('click', (e: Event) => {
 });
 
 updatePageList();
+
+// ─── Title Bar: Page Selector ─────────────────────────────────────────
+
+function updateTitleBarPage(): void {
+    const pages = JSON.parse(app.get_pages()) as Array<{ index: number; name: string }>;
+    const current = app.current_page_index();
+    const currentPage = pages.find(p => p.index === current);
+    tbPageLabel.textContent = currentPage ? currentPage.name : 'Page 1';
+
+    let menuHtml = '';
+    for (const p of pages) {
+        menuHtml += `<div class="tb-dropdown-item${p.index === current ? ' active' : ''}" data-page="${p.index}">
+            <span>${p.name}</span>
+            ${p.index === current ? '<span style="color:var(--accent);font-size:12px">✓</span>' : ''}
+        </div>`;
+    }
+    tbPageMenu.innerHTML = menuHtml;
+}
+updateTitleBarPage();
+
+tbPageBtn.addEventListener('click', (e: Event) => {
+    e.stopPropagation();
+    tbPageMenu.classList.toggle('open');
+    tbViewMenu.classList.remove('open');
+});
+
+tbPageMenu.addEventListener('click', (e: Event) => {
+    const target = (e.target as HTMLElement).closest('.tb-dropdown-item') as HTMLElement;
+    if (!target) return;
+    const pageIdx = target.dataset['page'];
+    if (pageIdx !== undefined) {
+        app.switch_page(parseInt(pageIdx));
+        layersDirty = true;
+        updatePageList();
+        updateTitleBarPage();
+        render(true);
+    }
+    tbPageMenu.classList.remove('open');
+});
+
+// ─── Title Bar: View Menu ─────────────────────────────────────────────
+
+function updateViewMenu(): void {
+    const gridOn = app.get_snap_grid() > 0;
+    tbViewMenu.innerHTML = `
+        <div class="tb-dropdown-item" data-view="zoom-fit">
+            <span>Zoom to Fit</span><span class="shortcut">⌘0</span>
+        </div>
+        <div class="tb-dropdown-item" data-view="zoom-100">
+            <span>Zoom to 100%</span>
+        </div>
+        <div class="tb-dropdown-item${showRulers ? ' active' : ''}" data-view="rulers">
+            <span>${showRulers ? '✓ ' : ''}Rulers</span><span class="shortcut">⌘⇧R</span>
+        </div>
+        <div class="tb-dropdown-item${gridOn ? ' active' : ''}" data-view="grid">
+            <span>${gridOn ? '✓ ' : ''}Grid Snap</span><span class="shortcut">⌘'</span>
+        </div>
+        <div class="tb-dropdown-item" data-view="layers">
+            <span>${!layersPanel.classList.contains('collapsed') ? '✓ ' : ''}Layers</span><span class="shortcut">⌘1</span>
+        </div>
+    `;
+}
+updateViewMenu();
+
+tbViewBtn.addEventListener('click', (e: Event) => {
+    e.stopPropagation();
+    tbViewMenu.classList.toggle('open');
+    tbPageMenu.classList.remove('open');
+    updateViewMenu();
+});
+
+tbViewMenu.addEventListener('click', (e: Event) => {
+    const target = (e.target as HTMLElement).closest('.tb-dropdown-item') as HTMLElement;
+    if (!target) return;
+    const view = target.dataset['view'];
+    switch (view) {
+        case 'zoom-fit': app.zoom_to_fit(); break;
+        case 'zoom-100': { const c = app.get_camera(); app.set_camera(c[0], c[1], 1.0); } break;
+        case 'rulers': showRulers = !showRulers; break;
+        case 'grid': {
+            const c = app.get_snap_grid();
+            app.set_snap_grid(c > 0 ? 0 : 8);
+            break;
+        }
+        case 'layers': toggleLayers(); break;
+    }
+    tbViewMenu.classList.remove('open');
+    updateViewMenu();
+    render();
+});
+
+// Close dropdowns on outside click
+document.addEventListener('click', () => {
+    tbPageMenu.classList.remove('open');
+    tbViewMenu.classList.remove('open');
+});
+
+// ─── Title Bar: Design/AI Mode Toggle ─────────────────────────────────
+
+function setAppMode(mode: 'design' | 'ai'): void {
+    appMode = mode;
+
+    // Update mode pill
+    tbModeDesign.classList.toggle('active', mode === 'design');
+    tbModeAi.classList.toggle('active', mode === 'ai');
+    tbModePill.classList.toggle('ai-active', mode === 'ai');
+
+    // Update toolbar AI button
+    toolbarAiBtn.classList.toggle('active', mode === 'ai');
+
+    // Toggle inspector vs AI panel
+    if (mode === 'design') {
+        aiPanel.classList.add('hidden');
+        if (showInspector) inspectorPanel.classList.remove('hidden');
+    } else {
+        aiPanel.classList.remove('hidden');
+        inspectorPanel.classList.add('hidden');
+    }
+
+    // Update status bar
+    updateStatusBar();
+}
+
+tbModeDesign.addEventListener('click', () => setAppMode('design'));
+tbModeAi.addEventListener('click', () => setAppMode('ai'));
+
+// ─── Title Bar: Zoom Controls ─────────────────────────────────────────
+
+function updateZoomDisplay(): void {
+    const cam = app.get_camera();
+    const pct = Math.round(cam[2] * 100);
+    tbZoomVal.textContent = pct + '%';
+}
+
+tbZoomIn.addEventListener('click', () => {
+    const cam = app.get_camera();
+    const newZoom = Math.min(8, cam[2] * 1.25);
+    app.set_camera(cam[0], cam[1], newZoom);
+    render();
+    updateZoomDisplay();
+});
+
+tbZoomOut.addEventListener('click', () => {
+    const cam = app.get_camera();
+    const newZoom = Math.max(0.1, cam[2] / 1.25);
+    app.set_camera(cam[0], cam[1], newZoom);
+    render();
+    updateZoomDisplay();
+});
+
+// ─── Share button ─────────────────────────────────────────────────────
+const shareBtn = document.querySelector('.tb-share-btn');
+if (shareBtn) {
+    shareBtn.addEventListener('click', () => {
+        const url = window.location.href;
+        navigator.clipboard.writeText(url).then(() => {
+            const orig = shareBtn.textContent;
+            shareBtn.textContent = 'Copied!';
+            setTimeout(() => { shareBtn.textContent = orig; }, 1500);
+        }).catch(() => {
+            // Fallback: just flash to indicate action
+            shareBtn.textContent = 'Link copied';
+            setTimeout(() => { shareBtn.textContent = 'Share'; }, 1500);
+        });
+    });
+}
+
+// ─── Layers Toggle ────────────────────────────────────────────────────
+
+function toggleLayers(): void {
+    layersPanel.classList.toggle('collapsed');
+    layersToggle.classList.toggle('active', !layersPanel.classList.contains('collapsed'));
+    // Resize canvas after animation
+    setTimeout(() => { resize(); render(); }, 350);
+}
+
+layersToggle.addEventListener('click', toggleLayers);
+
+// ─── Left Panel Tabs (Pages / Layers / Assets) ───────────────────────
+
+let leftTab: 'pages' | 'layers' | 'assets' = 'pages';
+const leftPillSlider = document.getElementById('left-pill-slider')!;
+const leftTabBtns = document.querySelectorAll('.left-panel-tab');
+const pagesSection = document.getElementById('pages-section')!;
+const layersSection = document.getElementById('layers-section')!;
+const assetsSection = document.getElementById('assets-section')!;
+const assetsList = document.getElementById('assets-list')!;
+
+function switchLeftTab(tab: 'pages' | 'layers' | 'assets'): void {
+    leftTab = tab;
+    leftPillSlider.setAttribute('data-ltab', tab);
+    leftTabBtns.forEach(b => b.classList.toggle('active', (b as HTMLElement).dataset['ltab'] === tab));
+    pagesSection.style.display = tab === 'pages' ? '' : 'none';
+    layersSection.style.display = tab === 'layers' ? '' : 'none';
+    assetsSection.style.display = tab === 'assets' ? '' : 'none';
+    if (tab === 'layers') render(true); // refresh layers list
+    if (tab === 'assets') updateAssetsList();
+}
+
+leftTabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+        switchLeftTab((btn as HTMLElement).dataset['ltab'] as 'pages' | 'layers' | 'assets');
+    });
+});
+
+// Assets: collect all image fills from the project
+function updateAssetsList(): void {
+    let assets: Array<{type: string; key: string; name: string; counter: number; client_id: number}> = [];
+    try {
+        assets = JSON.parse(app.get_all_image_keys());
+    } catch {}
+    if (assets.length === 0) {
+        assetsList.innerHTML = '<div style="padding:16px 8px;font-size:11px;color:var(--text-ghost)">No images in project</div>';
+        return;
+    }
+    let html = `<div style="padding:6px 8px 4px;font-size:10px;color:var(--text-ghost)">${assets.length} image${assets.length !== 1 ? 's' : ''}</div>`;
+    for (const asset of assets) {
+        const cached = imageCache.get(asset.key);
+        const label = asset.name || asset.key;
+        const typeTag = asset.type === 'node' ? 'Pixel' : 'Fill';
+        const thumbStyle = cached
+            ? `background-image:url('${cached.src}');background-size:cover;background-position:center`
+            : `background:var(--bg-hover);display:flex;align-items:center;justify-content:center`;
+        const thumbContent = cached ? '' :
+            '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1.5" y="1.5" width="11" height="11" rx="1.5" stroke="currentColor" stroke-width="0.9" opacity="0.4"/><circle cx="5" cy="5" r="1.2" stroke="currentColor" stroke-width="0.8" opacity="0.4"/><path d="M1.5 10L4.5 7L7 9.5L9 7.5L12.5 10" stroke="currentColor" stroke-width="0.8" opacity="0.4"/></svg>';
+        html += `<div class="asset-item" data-counter="${asset.counter}" data-client="${asset.client_id}">
+            <div class="asset-thumb" style="${thumbStyle}">${thumbContent}</div>
+            <div class="asset-info">
+                <div class="asset-name" title="${asset.key}">${label}</div>
+                <div class="asset-meta">${typeTag}</div>
+            </div>
+        </div>`;
+    }
+    assetsList.innerHTML = html;
+    // Click to select the node and jump to layers
+    assetsList.querySelectorAll('.asset-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const c = parseInt((item as HTMLElement).dataset['counter'] || '0');
+            const ci = parseInt((item as HTMLElement).dataset['client'] || '0');
+            if (c) {
+                app.select_node(c, ci);
+                switchLeftTab('layers');
+                render(true);
+            }
+        });
+    });
+}
+
+// ─── Floating Inspector ───────────────────────────────────────────────
+
+inspectorClose.addEventListener('click', () => {
+    showInspector = false;
+    inspectorPanel.classList.add('hidden');
+});
+
+// Inspector pill tab switching
+inspectorPillBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+        const tab = (btn as HTMLElement).dataset['tab'] as 'design' | 'layout';
+        inspectorTab = tab;
+        inspectorPillBtns.forEach(b => b.classList.toggle('active', b === btn));
+        inspectorPillSlider.setAttribute('data-tab', tab);
+        updatePropertiesPanel();
+    });
+});
+
+// Show inspector when selecting a node
+function showInspectorForSelection(): void {
+    if (appMode !== 'design') return;
+    const sel = app.get_selected();
+    if (sel.length >= 2) {
+        showInspector = true;
+        inspectorPanel.classList.remove('hidden');
+    } else {
+        showInspector = false;
+        inspectorPanel.classList.add('hidden');
+    }
+}
+
+// ─── AI Panel ─────────────────────────────────────────────────────────
+
+const aiChatHistory: Array<{ role: 'user' | 'ai'; text: string; action?: string }> = [
+    { role: 'ai', text: 'Hello! I\'m Canvas AI. I can help you modify your design. Try asking me to add elements, change colors, or restructure your layout.' },
+];
+
+function renderAiMessages(): void {
+    let html = '';
+    for (const msg of aiChatHistory) {
+        if (msg.role === 'ai') {
+            html += `<div class="ai-msg-ai">
+                <div class="ai-msg-avatar">✦</div>
+                <div style="flex:1">
+                    <p class="ai-msg-text">${msg.text}</p>
+                    ${msg.action ? `<div class="ai-msg-action"><span style="color:var(--green)">✓</span> ${msg.action}</div>` : ''}
+                </div>
+            </div>`;
+        } else {
+            html += `<div class="ai-msg-user"><div class="ai-msg-user-bubble">${msg.text}</div></div>`;
+        }
+    }
+    aiMessages.innerHTML = html;
+    aiMessages.scrollTop = aiMessages.scrollHeight;
+}
+
+function sendAiMessage(): void {
+    const text = aiInput.value.trim();
+    if (!text) return;
+
+    aiChatHistory.push({ role: 'user', text });
+    aiInput.value = '';
+    aiSendBtn.classList.remove('active');
+    renderAiMessages();
+
+    // Simulate AI response (placeholder — will be replaced with real AI integration)
+    setTimeout(() => {
+        aiChatHistory.push({
+            role: 'ai',
+            text: `I understand you want to "${text}". This feature will be connected to a real AI backend. For now, use the design tools to make changes manually.`,
+            action: 'Noted for implementation'
+        });
+        renderAiMessages();
+    }, 800);
+}
+
+renderAiMessages();
+
+aiSendBtn.addEventListener('click', sendAiMessage);
+aiInput.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Enter') { sendAiMessage(); e.preventDefault(); }
+});
+aiInput.addEventListener('input', () => {
+    aiSendBtn.classList.toggle('active', aiInput.value.trim().length > 0);
+});
+
+// Quick action buttons
+document.querySelectorAll('.ai-quick-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        aiInput.value = btn.textContent || '';
+        aiSendBtn.classList.add('active');
+        aiInput.focus();
+    });
+});
+
+// Toolbar AI button
+toolbarAiBtn.addEventListener('click', (e: Event) => {
+    e.stopPropagation();
+    setAppMode(appMode === 'ai' ? 'design' : 'ai');
+});
+
+// ─── Status Bar Update ────────────────────────────────────────────────
+
+function updateStatusBar(): void {
+    const statusBar = document.getElementById('status-bar')!;
+    const cam = app.get_camera();
+    const pct = Math.round(cam[2] * 100);
+    const pages = JSON.parse(app.get_pages()) as Array<{ index: number; name: string }>;
+    const current = app.current_page_index();
+    const currentPage = pages.find(p => p.index === current);
+
+    let html = `<span id="info" style="color:var(--text-secondary);font-weight:500">${currentPage?.name || 'Page 1'}</span>`;
+    html += `<span class="status-sep">·</span>`;
+    html += `<span style="color:var(--text-tertiary);font-family:var(--mono);font-size:10px">${pct}%</span>`;
+
+    if (appMode === 'ai') {
+        html += `<span class="status-sep">·</span>`;
+        html += `<span class="status-ai-active"><span class="status-ai-dot"></span> AI Active</span>`;
+    }
+
+    statusBar.innerHTML = html;
+}
 
 // ─── Color Picker (color_picker UI) ──────────────────────────────────
 
@@ -2414,7 +2844,11 @@ function openColorPicker(
 function updatePropertiesPanel(): void {
     const sel = app.get_selected();
     if (sel.length === 0) {
-        propertiesContent.innerHTML = '<div style="padding:16px 12px;font-size:11px;color:var(--text-ghost)">No selection</div>';
+        propertiesContent.innerHTML = '';
+        inspectorTitle.textContent = 'Properties';
+        inspectorTypeIcon.innerHTML = '';
+        inspectorPanel.classList.add('hidden');
+        showInspector = false;
         return;
     }
 
@@ -2458,78 +2892,51 @@ function updatePropertiesPanel(): void {
     const typeLabel = nodeInfo.type.charAt(0).toUpperCase() + nodeInfo.type.slice(1);
     const opacityPct = Math.round(nodeInfo.opacity * 100);
 
-    propertiesContent.innerHTML = `
-        <div class="prop-node-type">${typeLabel}</div>
-        <input class="prop-name-input" id="prop-name" value="${nodeInfo.name}" />
+    // Update inspector header
+    const TYPE_COLORS: Record<string, string> = { frame: 'var(--accent)', text: 'var(--purple)', vector: 'var(--orange)', image: 'var(--green)', component: 'var(--green)', instance: 'var(--indigo)' };
+    const iconColor = TYPE_COLORS[nodeInfo.type] || 'var(--text-tertiary)';
+    inspectorTitle.textContent = nodeInfo.name;
+    const TYPE_ICONS: Record<string, string> = {
+        frame: '<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M3.5 1V3.5M10.5 1V3.5M3.5 10.5V13M10.5 10.5V13M1 3.5H3.5M1 10.5H3.5M10.5 3.5H13M10.5 10.5H13" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><rect x="3.5" y="3.5" width="7" height="7" rx="0.5" stroke="currentColor" stroke-width="1"/></svg>',
+        rect: '<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><rect x="2" y="3" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1"/></svg>',
+        ellipse: '<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><ellipse cx="7" cy="7" rx="5" ry="4" stroke="currentColor" stroke-width="1"/></svg>',
+        text: '<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M3.5 3H10.5M7 3V11.5M5 11.5H9" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>',
+        vector: '<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M2 12L3.5 6.5L10 2L11.5 3.5L6 10L2 12Z" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/></svg>',
+        component: '<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M7 1L13 7L7 13L1 7L7 1Z" stroke="currentColor" stroke-width="1"/></svg>',
+    };
+    inspectorTypeIcon.innerHTML = TYPE_ICONS[nodeInfo.type] || TYPE_ICONS['rect'];
+    inspectorTypeIcon.style.color = iconColor;
 
+    // ─── Build HTML based on active tab ───
+    const layoutHTML = `
         <div class="prop-section">
+            <div class="prop-section-header"><span class="prop-section-title">Position</span></div>
             <div class="prop-row">
                 <span class="prop-row-label">X</span>
                 <input class="prop-compact-input" id="prop-x" type="number" value="${Math.round(nodeInfo.x)}" />
                 <span class="prop-row-label">Y</span>
                 <input class="prop-compact-input" id="prop-y" type="number" value="${Math.round(nodeInfo.y)}" />
             </div>
+        </div>
+        <div class="prop-section">
+            <div class="prop-section-header"><span class="prop-section-title">Size</span></div>
             <div class="prop-row">
                 <span class="prop-row-label">W</span>
                 <input class="prop-compact-input" id="prop-w" type="number" value="${Math.round(nodeInfo.width)}" />
                 <span class="prop-row-label">H</span>
                 <input class="prop-compact-input" id="prop-h" type="number" value="${Math.round(nodeInfo.height)}" />
             </div>
+        </div>
+        <div class="prop-section">
+            <div class="prop-section-header"><span class="prop-section-title">Rotation</span></div>
             <div class="prop-row">
                 <span class="prop-row-label" style="font-size:12px">↻</span>
                 <input class="prop-compact-input" id="prop-rotation" type="number" value="${Math.round(nodeInfo.rotation || 0)}" step="1" style="width:60px;flex:0 0 60px" />
                 <span style="font-size:10px;color:var(--text-ghost)">°</span>
             </div>
         </div>
-
         <div class="prop-section">
-            <div class="prop-opacity-row">
-                <span style="font-size:10px;color:var(--text-ghost)">Opacity</span>
-                <input id="prop-opacity" type="range" min="0" max="100" value="${opacityPct}" />
-                <span class="prop-opacity-val" id="prop-opacity-val">${opacityPct}%</span>
-            </div>
-            <div class="prop-row">
-                <span class="prop-row-label" style="font-size:9px">BM</span>
-                <select id="prop-blend" class="prop-compact-input" style="cursor:pointer">
-                    ${['normal','multiply','screen','overlay','darken','lighten','color-dodge','color-burn','hard-light','soft-light','difference','exclusion','hue','saturation','color','luminosity'].map(m =>
-                        `<option value="${m}"${nodeInfo.blendMode === m ? ' selected' : ''}>${m}</option>`
-                    ).join('')}
-                </select>
-            </div>
-        </div>
-
-        <div class="prop-section">
-            <div class="prop-section-header">
-                <span class="prop-section-title">Fill</span>
-                <button id="prop-fill-image" class="prop-mini-btn" title="Image fill">Img</button>
-            </div>
-            <div class="prop-row" style="padding-bottom:6px">
-                <div id="prop-fill-swatch" class="prop-color-swatch" style="background:${fillHex}" data-hex="${fillHex}"></div>
-                <input id="prop-fill-hex" class="prop-compact-input prop-hex-input" value="${fillHex}" style="flex:1" />
-                <input type="file" id="prop-fill-image-input" accept="image/*" style="display:none" />
-            </div>
-        </div>
-
-        <div class="prop-section">
-            <div class="prop-section-header">
-                <span class="prop-section-title">Stroke</span>
-            </div>
-            <div class="prop-row">
-                <input type="color" id="prop-stroke" value="${strokeHex}" style="width:24px;height:24px;border:1px solid var(--border-default);border-radius:4px;background:none;cursor:pointer;padding:0;flex-shrink:0" />
-                <input class="prop-compact-input" id="prop-stroke-weight" type="number" value="${nodeInfo.strokeWeight}" min="0" step="0.5" style="width:50px;flex:0 0 50px" />
-                <span style="font-size:10px;color:var(--text-ghost)">px</span>
-                <select id="prop-stroke-align" class="prop-compact-input" style="flex:1;cursor:pointer">
-                    <option value="center"${nodeInfo.strokeAlign === 'center' ? ' selected' : ''}>Center</option>
-                    <option value="inside"${nodeInfo.strokeAlign === 'inside' ? ' selected' : ''}>Inside</option>
-                    <option value="outside"${nodeInfo.strokeAlign === 'outside' ? ' selected' : ''}>Outside</option>
-                </select>
-            </div>
-        </div>
-
-        <div class="prop-section">
-            <div class="prop-section-header">
-                <span class="prop-section-title">Constraints</span>
-            </div>
+            <div class="prop-section-header"><span class="prop-section-title">Constraints</span></div>
             <div class="prop-row">
                 <span class="prop-row-label">H</span>
                 <select id="prop-ch" class="prop-compact-input" style="cursor:pointer">
@@ -2545,12 +2952,9 @@ function updatePropertiesPanel(): void {
                 </select>
             </div>
         </div>
-
         ${nodeInfo.type === 'frame' ? `
         <div class="prop-section">
-            <div class="prop-section-header">
-                <span class="prop-section-title">Auto Layout</span>
-            </div>
+            <div class="prop-section-header"><span class="prop-section-title">Auto Layout</span></div>
             ${nodeInfo.autoLayout ? `
             <div class="prop-row">
                 <select id="prop-al-dir" class="prop-compact-input" style="flex:1;cursor:pointer">
@@ -2572,12 +2976,51 @@ function updatePropertiesPanel(): void {
             `}
         </div>
         ` : ''}
+    `;
 
-        ${nodeInfo.type === 'text' ? `
+    const designHTML = `
+        <div class="prop-section">
+            <div class="prop-opacity-row">
+                <span style="font-size:10px;color:var(--text-ghost)">Opacity</span>
+                <input id="prop-opacity" type="range" min="0" max="100" value="${opacityPct}" />
+                <span class="prop-opacity-val" id="prop-opacity-val">${opacityPct}%</span>
+            </div>
+            <div class="prop-row">
+                <span class="prop-row-label" style="font-size:9px">BM</span>
+                <select id="prop-blend" class="prop-compact-input" style="cursor:pointer">
+                    ${['normal','multiply','screen','overlay','darken','lighten','color-dodge','color-burn','hard-light','soft-light','difference','exclusion','hue','saturation','color','luminosity'].map(m =>
+                        `<option value="${m}"${nodeInfo.blendMode === m ? ' selected' : ''}>${m}</option>`
+                    ).join('')}
+                </select>
+            </div>
+        </div>
         <div class="prop-section">
             <div class="prop-section-header">
-                <span class="prop-section-title">Text</span>
+                <span class="prop-section-title">Fill</span>
+                <button id="prop-fill-image" class="prop-mini-btn" title="Image fill">Img</button>
             </div>
+            <div class="prop-row" style="padding-bottom:6px">
+                <div id="prop-fill-swatch" class="prop-color-swatch" style="background:${fillHex}" data-hex="${fillHex}"></div>
+                <input id="prop-fill-hex" class="prop-compact-input prop-hex-input" value="${fillHex}" style="flex:1" />
+                <input type="file" id="prop-fill-image-input" accept="image/*" style="display:none" />
+            </div>
+        </div>
+        <div class="prop-section">
+            <div class="prop-section-header"><span class="prop-section-title">Stroke</span></div>
+            <div class="prop-row">
+                <input type="color" id="prop-stroke" value="${strokeHex}" style="width:24px;height:24px;border:1px solid var(--border-default);border-radius:4px;background:none;cursor:pointer;padding:0;flex-shrink:0" />
+                <input class="prop-compact-input" id="prop-stroke-weight" type="number" value="${nodeInfo.strokeWeight}" min="0" step="0.5" style="width:50px;flex:0 0 50px" />
+                <span style="font-size:10px;color:var(--text-ghost)">px</span>
+                <select id="prop-stroke-align" class="prop-compact-input" style="flex:1;cursor:pointer">
+                    <option value="center"${nodeInfo.strokeAlign === 'center' ? ' selected' : ''}>Center</option>
+                    <option value="inside"${nodeInfo.strokeAlign === 'inside' ? ' selected' : ''}>Inside</option>
+                    <option value="outside"${nodeInfo.strokeAlign === 'outside' ? ' selected' : ''}>Outside</option>
+                </select>
+            </div>
+        </div>
+        ${nodeInfo.type === 'text' ? `
+        <div class="prop-section">
+            <div class="prop-section-header"><span class="prop-section-title">Text</span></div>
             <div class="prop-row">
                 <select class="prop-compact-input" id="prop-font-family" style="flex:2;cursor:pointer">
                     ${['Inter', 'Roboto', 'Poppins', 'Material Symbols Outlined', 'system-ui', 'sans-serif', 'serif', 'monospace'].map(f =>
@@ -2613,6 +3056,14 @@ function updatePropertiesPanel(): void {
         </div>
         ` : ''}
     `;
+
+    // Common header (always shown)
+    const headerHTML = `
+        <div class="prop-node-type">${typeLabel}</div>
+        <input class="prop-name-input" id="prop-name" value="${nodeInfo.name}" />
+    `;
+
+    propertiesContent.innerHTML = headerHTML + (inspectorTab === 'layout' ? layoutHTML : designHTML);
 
     // Wire up change handlers
     const commitProp = (inputId: string, handler: (val: string) => void) => {

@@ -46,7 +46,7 @@ impl ChildList {
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &NodeId> {
+    pub fn iter(&self) -> std::slice::Iter<'_, NodeId> {
         self.children.iter()
     }
 

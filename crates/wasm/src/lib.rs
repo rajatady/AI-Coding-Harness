@@ -3289,6 +3289,59 @@ impl FigmaApp {
         true
     }
 
+    /// Bring selected nodes forward one step in z-order.
+    pub fn bring_forward(&mut self) -> bool {
+        if self.selected.is_empty() {
+            return false;
+        }
+        let page = match self.document.page_mut(self.current_page) {
+            Some(p) => p,
+            None => return false,
+        };
+        let mut moved = false;
+        for sel_id in self.selected.clone() {
+            if let Some(parent_id) = page.tree.parent_of(&sel_id) {
+                if let Some(children) = page.tree.children_of(&parent_id) {
+                    let len = children.len();
+                    if let Some(idx) = children.iter().position(|c| *c == sel_id) {
+                        if idx + 1 < len {
+                            let _ = page.tree.move_node(sel_id, parent_id, idx + 2);
+                            moved = true;
+                        }
+                    }
+                }
+            }
+        }
+        if moved { self.mark_dirty(); }
+        moved
+    }
+
+    /// Send selected nodes backward one step in z-order.
+    pub fn send_backward(&mut self) -> bool {
+        if self.selected.is_empty() {
+            return false;
+        }
+        let page = match self.document.page_mut(self.current_page) {
+            Some(p) => p,
+            None => return false,
+        };
+        let mut moved = false;
+        for sel_id in self.selected.clone().iter().rev() {
+            if let Some(parent_id) = page.tree.parent_of(sel_id) {
+                if let Some(children) = page.tree.children_of(&parent_id) {
+                    if let Some(idx) = children.iter().position(|c| c == sel_id) {
+                        if idx > 0 {
+                            let _ = page.tree.move_node(*sel_id, parent_id, idx - 1);
+                            moved = true;
+                        }
+                    }
+                }
+            }
+        }
+        if moved { self.mark_dirty(); }
+        moved
+    }
+
     /// Align selected nodes. direction: 0=left, 1=center-h, 2=right, 3=top, 4=center-v, 5=bottom
     pub fn align_selected(&mut self, direction: u32) -> bool {
         if self.selected.len() < 2 {
@@ -4444,7 +4497,7 @@ impl FigmaApp {
             }
         }
 
-        // Walk root's children (don't include root itself)
+        // Walk root's children in natural order (first child = top of layer panel)
         if let Some(children) = page.tree.children_of(&root_id) {
             for child_id in children.iter() {
                 walk(&page.tree, child_id, 0, &expanded, &mut rows);
@@ -4504,6 +4557,75 @@ impl FigmaApp {
             Some(n) => n.name.clone(),
             None => String::new(),
         }
+    }
+
+    /// Get all image assets on the current page.
+    /// Returns JSON array: [{type:"node"|"fill", key:string, name:string, counter:u64, client_id:u32}]
+    /// "node" = NodeKind::Image (raw pixels), "fill" = Paint::Image (referenced by path).
+    pub fn get_all_image_keys(&self) -> String {
+        let page = match self.document.page(self.current_page) {
+            Some(p) => p,
+            None => return "[]".into(),
+        };
+        let root = page.tree.root_id();
+        let traversal = page.tree.traverse_depth_first(&root);
+        let mut results = Vec::new();
+        let mut seen_paths = std::collections::BTreeSet::new();
+        for node_id in &traversal {
+            if let Some(node) = page.tree.get(node_id) {
+                // NodeKind::Image — raw pixel image nodes
+                if matches!(&node.kind, figma_engine::node::NodeKind::Image { .. }) {
+                    results.push(format!(
+                        "{{\"type\":\"node\",\"key\":\"{}\",\"name\":\"{}\",\"counter\":{},\"client_id\":{}}}",
+                        node.name.replace('"', "\\\""),
+                        node.name.replace('"', "\\\""),
+                        node_id.0.counter, node_id.0.client_id
+                    ));
+                }
+                // Paint::Image fills
+                for fill in &node.style.fills {
+                    if let figma_engine::properties::Paint::Image { path, .. } = fill {
+                        if seen_paths.insert(path.clone()) {
+                            results.push(format!(
+                                "{{\"type\":\"fill\",\"key\":\"{}\",\"name\":\"{}\",\"counter\":{},\"client_id\":{}}}",
+                                path.replace('"', "\\\""),
+                                node.name.replace('"', "\\\""),
+                                node_id.0.counter, node_id.0.client_id
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        format!("[{}]", results.join(","))
+    }
+
+    /// Find nodes that use a specific image key. Returns JSON array of {counter, client_id, name}.
+    pub fn find_nodes_with_image(&self, image_key: &str) -> String {
+        let page = match self.document.page(self.current_page) {
+            Some(p) => p,
+            None => return "[]".into(),
+        };
+        let root = page.tree.root_id();
+        let traversal = page.tree.traverse_depth_first(&root);
+        let mut results = Vec::new();
+        for node_id in &traversal {
+            if let Some(node) = page.tree.get(node_id) {
+                // Match by node name (for NodeKind::Image) or by fill path
+                let is_match = node.name == image_key || node.style.fills.iter().any(|f| {
+                    matches!(f, figma_engine::properties::Paint::Image { path, .. } if path == image_key)
+                });
+                if is_match {
+                    results.push(format!(
+                        "{{\"counter\":{},\"client_id\":{},\"name\":\"{}\"}}",
+                        node_id.0.counter, node_id.0.client_id,
+                        node.name.replace('"', "\\\"")
+                    ));
+                    if results.len() >= 50 { break; }
+                }
+            }
+        }
+        format!("[{}]", results.join(","))
     }
 
     // ─── Page management ─────────────────────────────────────────────
