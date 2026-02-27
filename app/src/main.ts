@@ -10,14 +10,15 @@ await init();
 const app = new FigmaApp("Untitled", 1);
 // Expose app globally for headless/AI control (DaVinci Resolve-style)
 (window as any)._app = app;
-(window as any)._updatePageTabs = () => updatePageTabs();
+(window as any)._updatePageTabs = () => updatePageList();
 (window as any)._render = (force?: boolean) => render(force ?? true);
 
 const canvas = document.getElementById('canvas') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d')!;
 const info = document.getElementById('info')!;
 const layersList = document.getElementById('layers-list')!;
-const pageTabs = document.getElementById('page-tabs')!;
+const pageList = document.getElementById('page-list')!;
+const addPageBtn = document.getElementById('add-page-btn')!;
 const propertiesContent = document.getElementById('properties-content')!;
 
 // ─── Canvas sizing (DPR-aware for crisp Retina rendering) ───────────
@@ -1062,10 +1063,13 @@ function drawRulers(): void {
 let spaceHeld = false;
 
 canvas.addEventListener('mousedown', (e: MouseEvent) => {
+    // Commit inline text edit if open
+    if (inlineTextEditor) commitInlineTextEdit();
+
     // Middle-click or space+click = pan
     if (e.button === 1 || spaceHeld) {
         app.pan_start(e.offsetX, e.offsetY);
-        canvas.style.cursor = 'grabbing';
+        setCursor('grabbing');
         e.preventDefault();
         return;
     }
@@ -1079,7 +1083,7 @@ canvas.addEventListener('mousedown', (e: MouseEvent) => {
     }
 
     const hit = app.mouse_down(e.offsetX, e.offsetY, e.shiftKey);
-    canvas.style.cursor = hit ? 'move' : 'default';
+    setCursor(hit ? 'move' : 'default');
     render();
     if (app.is_vector_editing()) drawVectorEditOverlay();
 });
@@ -1118,9 +1122,9 @@ canvas.addEventListener('mousemove', (e: MouseEvent) => {
     // Rotation cursor hint when hovering near corners
     if (e.buttons === 0 && !spaceHeld && !app.pen_is_active()) {
         if (app.is_rotation_zone(e.offsetX, e.offsetY)) {
-            canvas.style.cursor = 'crosshair';
+            setCursor('crosshair');
         } else {
-            canvas.style.cursor = 'default';
+            setCursor('default');
         }
     }
     if (app.needs_render()) {
@@ -1139,7 +1143,7 @@ canvas.addEventListener('mouseup', (e: MouseEvent) => {
     app.pan_end();
     const wasCreating = app.is_creating();
     app.mouse_up();
-    canvas.style.cursor = spaceHeld ? 'grab' : 'default';
+    setCursor(spaceHeld ? 'grab' : 'default');
     render();
     if (wasCreating) {
         requestAnimationFrame(() => { updateLayersPanel(); });
@@ -1148,15 +1152,124 @@ canvas.addEventListener('mouseup', (e: MouseEvent) => {
     if (app.is_vector_editing()) drawVectorEditOverlay();
 });
 
+// ─── Inline Text Editing ────────────────────────────────────────────
+
+let inlineTextEditor: HTMLTextAreaElement | null = null;
+let inlineTextNodeId: [number, number] | null = null;
+
+function startInlineTextEdit(counter: number, clientId: number, info: any): void {
+    if (inlineTextEditor) commitInlineTextEdit();
+
+    const cam = app.get_camera(); // [cx, cy, zoom]
+    const zoom = cam[2];
+    // Use world bounds (absolute position) instead of local info.x/y
+    const wb = app.get_node_world_bounds(counter, clientId); // [wx, wy, w, h]
+    const sx = (wb[0] - cam[0]) * zoom;
+    const sy = (wb[1] - cam[1]) * zoom;
+    const sw = wb[2] * zoom;
+    const sh = Math.max(wb[3] * zoom, 24);
+
+    // Get canvas bounding rect for absolute positioning
+    const canvasRect = canvas.getBoundingClientRect();
+
+    const editor = document.createElement('textarea');
+    editor.className = 'inline-text-editor';
+    editor.value = info.text || '';
+    editor.style.position = 'fixed';
+    editor.style.left = `${canvasRect.left + sx}px`;
+    editor.style.top = `${canvasRect.top + sy}px`;
+    editor.style.width = `${Math.max(sw, 40)}px`;
+    editor.style.minHeight = `${sh}px`;
+    editor.style.fontSize = `${(info.fontSize || 16) * zoom}px`;
+    editor.style.fontFamily = `'${info.fontFamily || 'Inter'}', sans-serif`;
+    editor.style.fontWeight = String(info.fontWeight || 400);
+    editor.style.lineHeight = info.lineHeight ? `${info.lineHeight * zoom}px` : 'normal';
+    editor.style.letterSpacing = info.letterSpacing ? `${info.letterSpacing * zoom}px` : 'normal';
+    editor.style.zIndex = '150';
+
+    document.body.appendChild(editor);
+    editor.focus();
+    editor.select();
+
+    inlineTextEditor = editor;
+    inlineTextNodeId = [counter, clientId];
+
+    // Commit on blur
+    editor.addEventListener('blur', () => commitInlineTextEdit());
+
+    // Escape cancels, Enter (without Shift) commits
+    editor.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+            cancelInlineTextEdit();
+            e.stopPropagation();
+        }
+    });
+
+    // Stop click events from reaching canvas
+    editor.addEventListener('mousedown', (e) => e.stopPropagation());
+    editor.addEventListener('click', (e) => e.stopPropagation());
+}
+
+function commitInlineTextEdit(): void {
+    if (!inlineTextEditor || !inlineTextNodeId) return;
+    const newText = inlineTextEditor.value;
+    const [c, ci] = inlineTextNodeId;
+    app.set_node_text(c, ci, newText);
+    render();
+    updatePropertiesPanel();
+    cleanupInlineTextEdit();
+}
+
+function cancelInlineTextEdit(): void {
+    cleanupInlineTextEdit();
+}
+
+function cleanupInlineTextEdit(): void {
+    if (inlineTextEditor) {
+        const el = inlineTextEditor;
+        inlineTextEditor = null; // Clear ref first to prevent re-entrant blur handler
+        inlineTextNodeId = null;
+        if (el.parentNode) el.remove();
+        return;
+    }
+    inlineTextNodeId = null;
+}
+
 canvas.addEventListener('dblclick', (e: MouseEvent) => {
     if (app.pen_is_active()) {
         app.pen_finish_open();
         render();
         return;
     }
-    // Trigger double-click on the selected node (enters group or vector edit)
+
+    // Check if current selection is already a text node (direct dblclick on text)
+    const selBefore = app.get_selected();
+    if (selBefore.length >= 2) {
+        try {
+            const info = JSON.parse(app.get_node_info(selBefore[0], selBefore[1]));
+            if (info.type === 'text') {
+                startInlineTextEdit(selBefore[0], selBefore[1], info);
+                return;
+            }
+        } catch (_) {}
+    }
+
+    // Enter group / vector edit (dblclick on frame enters it, selecting child)
     app.handle_double_click(e.offsetX, e.offsetY);
     render();
+
+    // After entering group, check if the now-selected child is a text node
+    const selAfter = app.get_selected();
+    if (selAfter.length >= 2) {
+        try {
+            const info = JSON.parse(app.get_node_info(selAfter[0], selAfter[1]));
+            if (info.type === 'text') {
+                startInlineTextEdit(selAfter[0], selAfter[1], info);
+                return;
+            }
+        } catch (_) {}
+    }
+
     if (app.is_vector_editing()) drawVectorEditOverlay();
 });
 
@@ -1177,166 +1290,207 @@ canvas.addEventListener('wheel', (e: WheelEvent) => {
     render();
 }, {passive: false});
 
+// ─── Cursor Helper ───────────────────────────────────────────────────
+
+function setCursor(type: 'default' | 'crosshair' | 'grab' | 'grabbing' | 'move') {
+    canvas.style.cursor = `var(--cursor-${type})`;
+}
+
+// ─── Shortcut Registry ──────────────────────────────────────────────
+
+interface Shortcut {
+    key: string;
+    modifiers?: ('meta' | 'shift' | 'alt')[];
+    action: () => void;
+    label: string;
+    category: 'tools' | 'edit' | 'view' | 'arrange' | 'boolean' | 'align';
+    when?: () => boolean;
+}
+
+const notInput = () => {
+    const tag = (document.activeElement as HTMLElement)?.tagName;
+    return tag !== 'INPUT' && tag !== 'TEXTAREA';
+};
+
+let helpDialogVisible = false;
+
+const SHORTCUTS: Shortcut[] = [
+    // ── Tools ──
+    { key: 'r', action: () => { app.start_creating('rect'); setCursor('crosshair'); }, label: 'Rectangle', category: 'tools', when: notInput },
+    { key: 'o', action: () => { app.start_creating('ellipse'); setCursor('crosshair'); }, label: 'Ellipse', category: 'tools', when: notInput },
+    { key: 'f', action: () => { app.start_creating('frame'); setCursor('crosshair'); }, label: 'Frame', category: 'tools', when: notInput },
+    { key: 't', action: () => { app.start_creating('text'); setCursor('crosshair'); }, label: 'Text', category: 'tools', when: notInput },
+    { key: 's', action: () => { app.start_creating('star'); setCursor('crosshair'); }, label: 'Star', category: 'tools', when: notInput },
+    { key: 'p', action: () => { app.pen_start(); setCursor('crosshair'); }, label: 'Pen', category: 'tools', when: notInput },
+    { key: 'v', action: () => { setCursor('default'); }, label: 'Select', category: 'tools', when: notInput },
+
+    // ── Edit ──
+    { key: 'Delete', action: () => { app.delete_selected(); }, label: 'Delete', category: 'edit' },
+    { key: 'Backspace', action: () => { app.delete_selected(); }, label: 'Delete', category: 'edit' },
+    { key: 'z', modifiers: ['meta'], action: () => { app.undo(); layersDirty = true; }, label: 'Undo', category: 'edit' },
+    { key: 'z', modifiers: ['meta', 'shift'], action: () => { app.redo(); layersDirty = true; }, label: 'Redo', category: 'edit' },
+    { key: 'c', modifiers: ['meta'], action: () => { app.copy_selected(); }, label: 'Copy', category: 'edit' },
+    { key: 'v', modifiers: ['meta'], action: () => { app.paste(); layersDirty = true; }, label: 'Paste', category: 'edit' },
+    { key: 'd', modifiers: ['meta'], action: () => { app.duplicate_selected(); layersDirty = true; }, label: 'Duplicate', category: 'edit' },
+    { key: 'a', modifiers: ['meta'], action: () => { app.select_all(); }, label: 'Select All', category: 'edit' },
+    { key: 'g', modifiers: ['meta'], action: () => { app.group_selected(); layersDirty = true; }, label: 'Group', category: 'edit' },
+    { key: 'g', modifiers: ['meta', 'shift'], action: () => { app.ungroup_selected(); layersDirty = true; }, label: 'Ungroup', category: 'edit' },
+
+    // ── View ──
+    { key: '0', modifiers: ['meta'], action: () => { app.zoom_to_fit(); }, label: 'Zoom to Fit', category: 'view' },
+    { key: 'v', modifiers: ['meta', 'shift'], action: () => { useCanvas2d = !useCanvas2d; }, label: 'Toggle Renderer', category: 'view' },
+    { key: 'r', modifiers: ['meta', 'shift'], action: () => { showRulers = !showRulers; }, label: 'Toggle Rulers', category: 'view' },
+    { key: "'", modifiers: ['meta'], action: () => { const c = app.get_snap_grid(); app.set_snap_grid(c > 0 ? 0 : 8); }, label: 'Toggle Grid Snap', category: 'view' },
+    { key: '?', modifiers: ['shift'], action: () => { toggleHelpDialog(); }, label: 'Keyboard Shortcuts', category: 'view' },
+
+    // ── Arrange ──
+    { key: ']', modifiers: ['meta'], action: () => { app.bring_to_front(); }, label: 'Bring to Front', category: 'arrange' },
+    { key: '[', modifiers: ['meta'], action: () => { app.send_to_back(); }, label: 'Send to Back', category: 'arrange' },
+
+    // ── Boolean ──
+    { key: 'u', modifiers: ['meta', 'shift'], action: () => { app.boolean_op(0); layersDirty = true; }, label: 'Union', category: 'boolean' },
+    { key: 's', modifiers: ['meta', 'shift'], action: () => { app.boolean_op(1); layersDirty = true; }, label: 'Subtract', category: 'boolean' },
+    { key: 'i', modifiers: ['meta', 'shift'], action: () => { app.boolean_op(2); layersDirty = true; }, label: 'Intersect', category: 'boolean' },
+    { key: 'e', modifiers: ['meta', 'shift'], action: () => { app.boolean_op(3); layersDirty = true; }, label: 'Exclude', category: 'boolean' },
+
+    // ── Align ──
+    { key: 'a', modifiers: ['alt'], action: () => { app.align_selected(0); }, label: 'Align Left', category: 'align' },
+    { key: 'h', modifiers: ['alt'], action: () => { app.align_selected(1); }, label: 'Align Center H', category: 'align' },
+    { key: 'd', modifiers: ['alt'], action: () => { app.align_selected(2); }, label: 'Align Right', category: 'align' },
+    { key: 'w', modifiers: ['alt'], action: () => { app.align_selected(3); }, label: 'Align Top', category: 'align' },
+    { key: 'v', modifiers: ['alt'], action: () => { app.align_selected(4); }, label: 'Align Center V', category: 'align' },
+    { key: 's', modifiers: ['alt'], action: () => { app.align_selected(5); }, label: 'Align Bottom', category: 'align' },
+    { key: 'h', modifiers: ['alt', 'shift'], action: () => { app.distribute_selected(0); }, label: 'Distribute H', category: 'align' },
+    { key: 'v', modifiers: ['alt', 'shift'], action: () => { app.distribute_selected(1); }, label: 'Distribute V', category: 'align' },
+];
+
+function matchesShortcut(e: KeyboardEvent, s: Shortcut): boolean {
+    const mods = s.modifiers || [];
+    const needMeta = mods.includes('meta');
+    const needShift = mods.includes('shift');
+    const needAlt = mods.includes('alt');
+
+    const hasMeta = e.metaKey || e.ctrlKey;
+    const hasShift = e.shiftKey;
+    const hasAlt = e.altKey;
+
+    if (needMeta !== hasMeta) return false;
+    if (needShift !== hasShift) return false;
+    if (needAlt !== hasAlt) return false;
+
+    // Match key case-insensitively for letters, exact for special keys
+    const eKey = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    const sKey = s.key.length === 1 ? s.key.toLowerCase() : s.key;
+    return eKey === sKey;
+}
+
+function formatShortcutKey(s: Shortcut): string {
+    const isMac = navigator.platform.includes('Mac');
+    const parts: string[] = [];
+    const mods = s.modifiers || [];
+    if (mods.includes('meta')) parts.push(isMac ? '\u2318' : 'Ctrl');
+    if (mods.includes('shift')) parts.push(isMac ? '\u21E7' : 'Shift');
+    if (mods.includes('alt')) parts.push(isMac ? '\u2325' : 'Alt');
+
+    let keyLabel = s.key.length === 1 ? s.key.toUpperCase() : s.key;
+    if (keyLabel === 'Delete') keyLabel = isMac ? '\u232B' : 'Del';
+    if (keyLabel === 'Backspace') keyLabel = isMac ? '\u232B' : 'Bksp';
+    if (keyLabel === "'") keyLabel = "'";
+    if (keyLabel === '?') keyLabel = '?';
+    parts.push(keyLabel);
+    return parts.join('');
+}
+
 // ─── Keyboard ────────────────────────────────────────────────────────
 
 window.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (e.key === 'Delete' || e.key === 'Backspace') {
-        app.delete_selected();
-        render();
-    }
-    if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
-        e.preventDefault();
-        app.undo();
-        layersDirty = true;
-        render();
-    }
-    if ((e.metaKey || e.ctrlKey) && (e.key === 'Z' || (e.key === 'z' && e.shiftKey))) {
-        e.preventDefault();
-        app.redo();
-        layersDirty = true;
-        render();
-    }
+    // Special: Escape (multi-behavior)
     if (e.key === 'Escape') {
-        if (app.is_creating()) {
-            app.cancel_creating();
-            canvas.style.cursor = 'default';
-            render();
-        } else if (app.pen_is_active()) {
-            app.pen_cancel();
-            canvas.style.cursor = 'default';
-        } else if (app.is_vector_editing()) {
-            app.vector_edit_exit();
-        } else {
-            // Exit entered group (if any) — Escape pops up one level
-            app.exit_group();
-        }
+        if (helpDialogVisible) { toggleHelpDialog(); return; }
+        if (app.is_creating()) { app.cancel_creating(); setCursor('default'); render(); return; }
+        if (app.pen_is_active()) { app.pen_cancel(); setCursor('default'); render(); return; }
+        if (app.is_vector_editing()) { app.vector_edit_exit(); render(); return; }
+        app.exit_group();
         render();
+        return;
     }
+    // Special: Enter finishes pen
     if (e.key === 'Enter' && app.pen_is_active()) {
-        app.pen_finish_open();
-        canvas.style.cursor = 'default';
-        render();
+        app.pen_finish_open(); setCursor('default'); render(); return;
     }
+    // Special: Space = pan mode (hold behavior)
     if (e.key === ' ' || e.code === 'Space') {
-        spaceHeld = true;
-        canvas.style.cursor = 'grab';
-        e.preventDefault();
+        spaceHeld = true; setCursor('grab'); e.preventDefault(); return;
     }
-    // Toggle renderer (Ctrl/Cmd+Shift+V)
-    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'v') {
-        e.preventDefault();
-        useCanvas2d = !useCanvas2d;
-        render();
-    }
-    // Toggle rulers (Ctrl/Cmd+Shift+R)
-    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'r') {
-        e.preventDefault();
-        showRulers = !showRulers;
-        render();
-    }
-    // Tool shortcuts (only when not typing in an input)
-    const tag = (e.target as HTMLElement).tagName;
-    if (tag !== 'INPUT' && tag !== 'TEXTAREA' && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        const toolKey = e.key.toLowerCase();
-        if (toolKey === 'r') { app.start_creating('rect'); canvas.style.cursor = 'crosshair'; render(); }
-        if (toolKey === 'o') { app.start_creating('ellipse'); canvas.style.cursor = 'crosshair'; render(); }
-        if (toolKey === 'f') { app.start_creating('frame'); canvas.style.cursor = 'crosshair'; render(); }
-        if (toolKey === 't') { app.start_creating('text'); canvas.style.cursor = 'crosshair'; render(); }
-        if (toolKey === 's' && !e.shiftKey) { app.start_creating('star'); canvas.style.cursor = 'crosshair'; render(); }
-        if (toolKey === 'p') { app.pen_start(); canvas.style.cursor = 'crosshair'; render(); }
-        if (toolKey === 'v') { canvas.style.cursor = 'default'; render(); }
-    }
-    // Copy/paste/duplicate
-    if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
-        app.copy_selected();
-    }
-    if ((e.metaKey || e.ctrlKey) && e.key === 'v') {
-        e.preventDefault();
-        app.paste();
-        layersDirty = true;
-        render();
-    }
-    if ((e.metaKey || e.ctrlKey) && e.key === 'd') {
-        e.preventDefault();
-        app.duplicate_selected();
-        layersDirty = true;
-        render();
-    }
-    // Boolean operations (Ctrl/Cmd + Shift + U/S/I/E)
-    if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
-        const boolOp = { 'u': 0, 's': 1, 'i': 2, 'e': 3 }[e.key.toLowerCase()];
-        if (boolOp !== undefined) {
+
+    // Registry-based dispatch (more specific modifiers match first)
+    // Sort: more modifiers first so Cmd+Shift+Z matches before Cmd+Z
+    for (const s of SHORTCUTS) {
+        if (matchesShortcut(e, s) && (!s.when || s.when())) {
             e.preventDefault();
-            app.boolean_op(boolOp);
-            layersDirty = true;
+            s.action();
             render();
+            return;
         }
-    }
-    // Group/Ungroup (Ctrl/Cmd + G / Ctrl/Cmd + Shift + G)
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g') {
-        e.preventDefault();
-        if (e.shiftKey) {
-            app.ungroup_selected();
-        } else {
-            app.group_selected();
-        }
-        layersDirty = true;
-        render();
-    }
-    // Zoom to fit (Ctrl/Cmd + 0)
-    if ((e.metaKey || e.ctrlKey) && e.key === '0') {
-        e.preventDefault();
-        app.zoom_to_fit();
-        render();
-    }
-    // Align shortcuts (Alt + A/H/D/W/V/S for left/center-h/right/top/center-v/bottom)
-    if (e.altKey && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
-        const alignOp = { 'a': 0, 'h': 1, 'd': 2, 'w': 3, 'v': 4, 's': 5 }[e.key.toLowerCase()];
-        if (alignOp !== undefined) {
-            e.preventDefault();
-            app.align_selected(alignOp);
-            render();
-        }
-    }
-    // Distribute shortcuts (Alt+Shift + H/V for horizontal/vertical)
-    if (e.altKey && e.shiftKey && !e.metaKey && !e.ctrlKey) {
-        const distOp = { 'h': 0, 'v': 1 }[e.key.toLowerCase()];
-        if (distOp !== undefined) {
-            e.preventDefault();
-            app.distribute_selected(distOp);
-            render();
-        }
-    }
-    // Snap-to-grid toggle (Ctrl/Cmd + ')
-    if ((e.metaKey || e.ctrlKey) && e.key === "'") {
-        e.preventDefault();
-        const current = app.get_snap_grid();
-        app.set_snap_grid(current > 0 ? 0 : 8);
-        render();
-    }
-    if ((e.metaKey || e.ctrlKey) && e.key === ']') {
-        e.preventDefault();
-        app.bring_to_front();
-        render();
-    }
-    if ((e.metaKey || e.ctrlKey) && e.key === '[') {
-        e.preventDefault();
-        app.send_to_back();
-        render();
-    }
-    if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
-        e.preventDefault();
-        app.select_all();
-        render();
     }
 });
 
 window.addEventListener('keyup', (e: KeyboardEvent) => {
     if (e.key === ' ' || e.code === 'Space') {
         spaceHeld = false;
-        canvas.style.cursor = 'default';
+        setCursor('default');
     }
 });
+
+// ─── Help Dialog (Shift+?) ──────────────────────────────────────────
+
+function toggleHelpDialog(): void {
+    helpDialogVisible = !helpDialogVisible;
+    let dialog = document.getElementById('shortcuts-dialog');
+
+    if (!helpDialogVisible) {
+        if (dialog) dialog.remove();
+        return;
+    }
+
+    dialog = document.createElement('div');
+    dialog.id = 'shortcuts-dialog';
+
+    // Group shortcuts by category, deduplicate by label
+    const categories: Record<string, { label: string; key: string }[]> = {};
+    const seen = new Set<string>();
+    for (const s of SHORTCUTS) {
+        const uid = `${s.category}:${s.label}`;
+        if (seen.has(uid)) continue;
+        seen.add(uid);
+        if (!categories[s.category]) categories[s.category] = [];
+        categories[s.category].push({ label: s.label, key: formatShortcutKey(s) });
+    }
+
+    const categoryLabels: Record<string, string> = {
+        tools: 'Tools', edit: 'Edit', view: 'View', arrange: 'Arrange', boolean: 'Boolean', align: 'Align'
+    };
+
+    let html = '<div class="shortcuts-content">';
+    html += '<div class="shortcuts-header"><span>Keyboard Shortcuts</span><span class="shortcuts-close" id="shortcuts-close">&times;</span></div>';
+    for (const [cat, items] of Object.entries(categories)) {
+        html += `<div class="shortcuts-category">${categoryLabels[cat] || cat}</div>`;
+        for (const item of items) {
+            html += `<div class="shortcuts-row"><span class="shortcuts-label">${item.label}</span><span class="shortcuts-key">${item.key}</span></div>`;
+        }
+    }
+    html += '</div>';
+    dialog.innerHTML = html;
+
+    // Click backdrop to close
+    dialog.addEventListener('click', (ev) => {
+        if ((ev.target as HTMLElement).id === 'shortcuts-dialog' || (ev.target as HTMLElement).id === 'shortcuts-close') {
+            toggleHelpDialog();
+        }
+    });
+
+    document.body.appendChild(dialog);
+}
 
 // ─── Context Menu ────────────────────────────────────────────────────
 
@@ -1437,37 +1591,37 @@ document.getElementById('toolbar')!.addEventListener('click', (e: Event) => {
     switch (action) {
         case 'add-rect':
             app.start_creating('rect');
-            canvas.style.cursor = 'crosshair';
+            setCursor('crosshair');
             render();
             return;
         case 'add-ellipse':
             app.start_creating('ellipse');
-            canvas.style.cursor = 'crosshair';
+            setCursor('crosshair');
             render();
             return;
         case 'add-text':
             app.start_creating('text');
-            canvas.style.cursor = 'crosshair';
+            setCursor('crosshair');
             render();
             return;
         case 'add-star':
             app.start_creating('star');
-            canvas.style.cursor = 'crosshair';
+            setCursor('crosshair');
             render();
             return;
         case 'add-polygon':
             app.start_creating('rect'); // polygon uses star with inner_ratio=1.0, but start_creating doesn't support it yet — fallback to rect
-            canvas.style.cursor = 'crosshair';
+            setCursor('crosshair');
             render();
             return;
         case 'add-frame':
             app.start_creating('frame');
-            canvas.style.cursor = 'crosshair';
+            setCursor('crosshair');
             render();
             return;
         case 'pen':
             app.pen_start();
-            canvas.style.cursor = 'crosshair';
+            setCursor('crosshair');
             render();
             return; // don't render twice
         case 'delete':
@@ -1596,7 +1750,7 @@ function importFigFile(file: File): void {
         }
 
         info.textContent = `Imported ${result.nodes} nodes, ${imgTotal} images in ${ms}ms`;
-        updatePageTabs();
+        updatePageList();
         layersDirty = true;
         render(true);
     };
@@ -1617,7 +1771,7 @@ function importFigFile(file: File): void {
             const result = app.import_fig_json(jsonStr, '');
             const ms = (performance.now() - t0).toFixed(0);
             console.log(`[import] ${file.name}: ${ms}ms`, result);
-            updatePageTabs();
+            updatePageList();
             layersDirty = true;
             render(true);
         };
@@ -1652,7 +1806,7 @@ canvas.addEventListener('drop', (e) => {
             const result = app.import_fig_json(jsonStr, '');
             const ms = (performance.now() - t0).toFixed(0);
             console.log(`[import] Dropped JSON: ${ms}ms`, result);
-            updatePageTabs();
+            updatePageList();
             layersDirty = true;
             render(true);
         };
@@ -1781,7 +1935,7 @@ async function importFigJson(url: string) {
         console.log(`[import] Done in ${ms}ms:`, result);
     }
 
-    updatePageTabs();
+    updatePageList();
     layersDirty = true;
     render();
 }
@@ -1938,39 +2092,40 @@ layersList.addEventListener('click', (e: Event) => {
     render();
 });
 
-// ─── Page tabs ──────────────────────────────────────────────────────
+// ─── Page list (vertical rows, Figma-style) ────────────────────────
 
-function updatePageTabs(): void {
+function updatePageList(): void {
     const pages = JSON.parse(app.get_pages()) as Array<{ index: number; name: string }>;
     const current = app.current_page_index();
     let html = '';
     for (const p of pages) {
-        html += `<div class="page-tab${p.index === current ? ' active' : ''}" data-page="${p.index}">${p.name}</div>`;
+        html += `<div class="page-item${p.index === current ? ' active' : ''}" data-page="${p.index}">${p.name}</div>`;
     }
-    html += `<div class="page-tab-add" data-action="add-page">+</div>`;
-    pageTabs.innerHTML = html;
+    pageList.innerHTML = html;
 }
 
-pageTabs.addEventListener('click', (e: Event) => {
+// Add page button in section header
+addPageBtn.addEventListener('click', () => {
+    const idx = app.add_page(`Page ${app.page_count() + 1}`);
+    app.switch_page(idx);
+    layersDirty = true;
+    updatePageList();
+    render(true);
+});
+
+// Click page to switch
+pageList.addEventListener('click', (e: Event) => {
     const target = e.target as HTMLElement;
-    if (target.dataset['action'] === 'add-page') {
-        const idx = app.add_page(`Page ${app.page_count() + 1}`);
-        app.switch_page(idx);
-        layersDirty = true;
-        updatePageTabs();
-        render(true);
-        return;
-    }
     const pageIdx = target.dataset['page'];
     if (pageIdx !== undefined) {
         app.switch_page(parseInt(pageIdx));
         layersDirty = true;
-        updatePageTabs();
+        updatePageList();
         render(true);
     }
 });
 
-updatePageTabs();
+updatePageList();
 
 // ─── Color Picker (color_picker UI) ──────────────────────────────────
 
@@ -2259,7 +2414,7 @@ function openColorPicker(
 function updatePropertiesPanel(): void {
     const sel = app.get_selected();
     if (sel.length === 0) {
-        propertiesContent.innerHTML = '<div class="prop-group"><span class="prop-label">No selection</span></div>';
+        propertiesContent.innerHTML = '<div style="padding:16px 12px;font-size:11px;color:var(--text-ghost)">No selection</div>';
         return;
     }
 
@@ -2267,7 +2422,7 @@ function updatePropertiesPanel(): void {
     const clientId = sel[1];
     const json = app.get_node_info(counter, clientId);
     if (!json) {
-        propertiesContent.innerHTML = '<div class="prop-group"><span class="prop-label">Node not found</span></div>';
+        propertiesContent.innerHTML = '<div style="padding:16px 12px;font-size:11px;color:var(--text-ghost)">Node not found</div>';
         return;
     }
 
@@ -2292,171 +2447,169 @@ function updatePropertiesPanel(): void {
         autoLayout?: { direction: string; spacing: number; padTop: number; padRight: number; padBottom: number; padLeft: number };
     };
 
-    // Parse rgba fill to hex for color input
     const toHex = (n: string) => parseInt(n).toString(16).padStart(2, '0');
     let fillHex = '#888888';
     const rgbaMatch = nodeInfo.fill.match(/rgba?\((\d+),(\d+),(\d+)/);
-    if (rgbaMatch) {
-        fillHex = `#${toHex(rgbaMatch[1])}${toHex(rgbaMatch[2])}${toHex(rgbaMatch[3])}`;
-    }
+    if (rgbaMatch) fillHex = `#${toHex(rgbaMatch[1])}${toHex(rgbaMatch[2])}${toHex(rgbaMatch[3])}`;
     let strokeHex = '#000000';
     const strokeMatch = nodeInfo.stroke.match(/rgba?\((\d+),(\d+),(\d+)/);
-    if (strokeMatch) {
-        strokeHex = `#${toHex(strokeMatch[1])}${toHex(strokeMatch[2])}${toHex(strokeMatch[3])}`;
-    }
-    const hasStroke = nodeInfo.strokeWeight > 0 && nodeInfo.stroke !== '';
+    if (strokeMatch) strokeHex = `#${toHex(strokeMatch[1])}${toHex(strokeMatch[2])}${toHex(strokeMatch[3])}`;
+
+    const typeLabel = nodeInfo.type.charAt(0).toUpperCase() + nodeInfo.type.slice(1);
+    const opacityPct = Math.round(nodeInfo.opacity * 100);
 
     propertiesContent.innerHTML = `
-        <div class="prop-group">
-            <div class="prop-label">Name</div>
-            <input class="prop-input" id="prop-name" value="${nodeInfo.name}" />
-        </div>
-        <div class="prop-group">
-            <div class="prop-label">Position</div>
-            <div style="display:flex;gap:6px">
-                <label style="font-size:10px;color:#666">X<input class="prop-input" id="prop-x" type="number" value="${Math.round(nodeInfo.x)}" style="width:60px;margin-left:4px" /></label>
-                <label style="font-size:10px;color:#666">Y<input class="prop-input" id="prop-y" type="number" value="${Math.round(nodeInfo.y)}" style="width:60px;margin-left:4px" /></label>
+        <div class="prop-node-type">${typeLabel}</div>
+        <input class="prop-name-input" id="prop-name" value="${nodeInfo.name}" />
+
+        <div class="prop-section">
+            <div class="prop-row">
+                <span class="prop-row-label">X</span>
+                <input class="prop-compact-input" id="prop-x" type="number" value="${Math.round(nodeInfo.x)}" />
+                <span class="prop-row-label">Y</span>
+                <input class="prop-compact-input" id="prop-y" type="number" value="${Math.round(nodeInfo.y)}" />
+            </div>
+            <div class="prop-row">
+                <span class="prop-row-label">W</span>
+                <input class="prop-compact-input" id="prop-w" type="number" value="${Math.round(nodeInfo.width)}" />
+                <span class="prop-row-label">H</span>
+                <input class="prop-compact-input" id="prop-h" type="number" value="${Math.round(nodeInfo.height)}" />
+            </div>
+            <div class="prop-row">
+                <span class="prop-row-label" style="font-size:12px">↻</span>
+                <input class="prop-compact-input" id="prop-rotation" type="number" value="${Math.round(nodeInfo.rotation || 0)}" step="1" style="width:60px;flex:0 0 60px" />
+                <span style="font-size:10px;color:var(--text-ghost)">°</span>
             </div>
         </div>
-        <div class="prop-group">
-            <div class="prop-label">Size</div>
-            <div style="display:flex;gap:6px">
-                <label style="font-size:10px;color:#666">W<input class="prop-input" id="prop-w" type="number" value="${Math.round(nodeInfo.width)}" style="width:60px;margin-left:4px" /></label>
-                <label style="font-size:10px;color:#666">H<input class="prop-input" id="prop-h" type="number" value="${Math.round(nodeInfo.height)}" style="width:60px;margin-left:4px" /></label>
+
+        <div class="prop-section">
+            <div class="prop-opacity-row">
+                <span style="font-size:10px;color:var(--text-ghost)">Opacity</span>
+                <input id="prop-opacity" type="range" min="0" max="100" value="${opacityPct}" />
+                <span class="prop-opacity-val" id="prop-opacity-val">${opacityPct}%</span>
+            </div>
+            <div class="prop-row">
+                <span class="prop-row-label" style="font-size:9px">BM</span>
+                <select id="prop-blend" class="prop-compact-input" style="cursor:pointer">
+                    ${['normal','multiply','screen','overlay','darken','lighten','color-dodge','color-burn','hard-light','soft-light','difference','exclusion','hue','saturation','color','luminosity'].map(m =>
+                        `<option value="${m}"${nodeInfo.blendMode === m ? ' selected' : ''}>${m}</option>`
+                    ).join('')}
+                </select>
             </div>
         </div>
-        <div class="prop-group">
-            <div class="prop-label">Rotation</div>
-            <div style="display:flex;align-items:center;gap:4px">
-                <input class="prop-input" id="prop-rotation" type="number" value="${Math.round(nodeInfo.rotation || 0)}" style="width:60px" step="1" />
-                <span style="font-size:10px;color:#666">°</span>
+
+        <div class="prop-section">
+            <div class="prop-section-header">
+                <span class="prop-section-title">Fill</span>
+                <button id="prop-fill-image" class="prop-mini-btn" title="Image fill">Img</button>
             </div>
-        </div>
-        <div class="prop-group">
-            <div class="prop-label">Fill</div>
-            <div style="display:flex;align-items:center;gap:8px">
-                <div id="prop-fill-swatch" style="width:32px;height:24px;border:1px solid #555;border-radius:3px;background:${fillHex};cursor:pointer" data-hex="${fillHex}"></div>
-                <input id="prop-fill-hex" class="prop-input" value="${fillHex}" style="width:80px;font-family:monospace;font-size:12px" />
-                <button id="prop-fill-image" style="background:#444;color:#ddd;border:1px solid #555;border-radius:3px;padding:2px 8px;cursor:pointer;font-size:11px" title="Set image fill">Img</button>
+            <div class="prop-row" style="padding-bottom:6px">
+                <div id="prop-fill-swatch" class="prop-color-swatch" style="background:${fillHex}" data-hex="${fillHex}"></div>
+                <input id="prop-fill-hex" class="prop-compact-input prop-hex-input" value="${fillHex}" style="flex:1" />
                 <input type="file" id="prop-fill-image-input" accept="image/*" style="display:none" />
             </div>
         </div>
-        <div class="prop-group">
-            <div class="prop-label">Stroke</div>
-            <div style="display:flex;align-items:center;gap:8px">
-                <input type="color" id="prop-stroke" value="${strokeHex}" style="width:32px;height:24px;border:1px solid #555;border-radius:3px;background:none;cursor:pointer" />
-                <input class="prop-input" id="prop-stroke-weight" type="number" value="${nodeInfo.strokeWeight}" style="width:50px" min="0" step="0.5" />
-                <span style="font-size:10px;color:#666">px</span>
+
+        <div class="prop-section">
+            <div class="prop-section-header">
+                <span class="prop-section-title">Stroke</span>
             </div>
-            <div style="display:flex;align-items:center;gap:4px;margin-top:4px">
-                <span style="font-size:10px;color:#666">Align</span>
-                <select id="prop-stroke-align" class="prop-input" style="flex:1;background:#333;color:#ddd;border:1px solid #555;padding:3px;border-radius:3px;font-size:11px">
+            <div class="prop-row">
+                <input type="color" id="prop-stroke" value="${strokeHex}" style="width:24px;height:24px;border:1px solid var(--border-default);border-radius:4px;background:none;cursor:pointer;padding:0;flex-shrink:0" />
+                <input class="prop-compact-input" id="prop-stroke-weight" type="number" value="${nodeInfo.strokeWeight}" min="0" step="0.5" style="width:50px;flex:0 0 50px" />
+                <span style="font-size:10px;color:var(--text-ghost)">px</span>
+                <select id="prop-stroke-align" class="prop-compact-input" style="flex:1;cursor:pointer">
                     <option value="center"${nodeInfo.strokeAlign === 'center' ? ' selected' : ''}>Center</option>
                     <option value="inside"${nodeInfo.strokeAlign === 'inside' ? ' selected' : ''}>Inside</option>
                     <option value="outside"${nodeInfo.strokeAlign === 'outside' ? ' selected' : ''}>Outside</option>
                 </select>
             </div>
         </div>
-        <div class="prop-group">
-            <div class="prop-label">Opacity</div>
-            <input class="prop-input" id="prop-opacity" type="range" min="0" max="100" value="${Math.round(nodeInfo.opacity * 100)}" style="width:100%" />
-        </div>
-        <div class="prop-group">
-            <div class="prop-label">Blend Mode</div>
-            <select id="prop-blend" class="prop-input" style="width:100%;background:#333;color:#ddd;border:1px solid #555;padding:4px;border-radius:3px">
-                ${['normal','multiply','screen','overlay','darken','lighten','color-dodge','color-burn','hard-light','soft-light','difference','exclusion','hue','saturation','color','luminosity'].map(m =>
-                    `<option value="${m}"${nodeInfo.blendMode === m ? ' selected' : ''}>${m}</option>`
-                ).join('')}
-            </select>
-        </div>
-        <div class="prop-group">
-            <div class="prop-label">Constraints</div>
-            <div style="display:flex;gap:6px">
-                <label style="font-size:10px;color:#666">H
-                <select id="prop-ch" class="prop-input" style="flex:1;background:#333;color:#ddd;border:1px solid #555;padding:3px;border-radius:3px;font-size:11px">
+
+        <div class="prop-section">
+            <div class="prop-section-header">
+                <span class="prop-section-title">Constraints</span>
+            </div>
+            <div class="prop-row">
+                <span class="prop-row-label">H</span>
+                <select id="prop-ch" class="prop-compact-input" style="cursor:pointer">
                     ${['left','right','leftRight','center','scale'].map(v =>
                         `<option value="${v}"${nodeInfo.constraintH === v ? ' selected' : ''}>${v}</option>`
                     ).join('')}
-                </select></label>
-                <label style="font-size:10px;color:#666">V
-                <select id="prop-cv" class="prop-input" style="flex:1;background:#333;color:#ddd;border:1px solid #555;padding:3px;border-radius:3px;font-size:11px">
+                </select>
+                <span class="prop-row-label">V</span>
+                <select id="prop-cv" class="prop-compact-input" style="cursor:pointer">
                     ${['top','bottom','topBottom','center','scale'].map(v =>
                         `<option value="${v}"${nodeInfo.constraintV === v ? ' selected' : ''}>${v}</option>`
                     ).join('')}
-                </select></label>
+                </select>
             </div>
         </div>
+
         ${nodeInfo.type === 'frame' ? `
-        <div class="prop-group">
-            <div class="prop-label">Auto Layout</div>
-            ${nodeInfo.autoLayout ? `
-            <div style="display:flex;flex-direction:column;gap:4px">
-                <div style="display:flex;gap:4px;align-items:center">
-                    <select id="prop-al-dir" class="prop-input" style="flex:1;background:#333;color:#ddd;border:1px solid #555;padding:3px;border-radius:3px;font-size:11px">
-                        <option value="horizontal"${nodeInfo.autoLayout.direction === 'horizontal' ? ' selected' : ''}>Horizontal</option>
-                        <option value="vertical"${nodeInfo.autoLayout.direction === 'vertical' ? ' selected' : ''}>Vertical</option>
-                    </select>
-                    <label style="font-size:10px;color:#666">Gap<input class="prop-input" id="prop-al-spacing" type="number" value="${nodeInfo.autoLayout.spacing}" style="width:40px;margin-left:2px" min="0" /></label>
-                </div>
-                <div style="display:flex;gap:4px">
-                    <label style="font-size:10px;color:#666">T<input class="prop-input" id="prop-al-pt" type="number" value="${nodeInfo.autoLayout.padTop}" style="width:36px;margin-left:2px" min="0" /></label>
-                    <label style="font-size:10px;color:#666">R<input class="prop-input" id="prop-al-pr" type="number" value="${nodeInfo.autoLayout.padRight}" style="width:36px;margin-left:2px" min="0" /></label>
-                    <label style="font-size:10px;color:#666">B<input class="prop-input" id="prop-al-pb" type="number" value="${nodeInfo.autoLayout.padBottom}" style="width:36px;margin-left:2px" min="0" /></label>
-                    <label style="font-size:10px;color:#666">L<input class="prop-input" id="prop-al-pl" type="number" value="${nodeInfo.autoLayout.padLeft}" style="width:36px;margin-left:2px" min="0" /></label>
-                </div>
-                <button id="prop-al-remove" style="background:#553;color:#daa;border:1px solid #664;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:11px">Remove Auto Layout</button>
+        <div class="prop-section">
+            <div class="prop-section-header">
+                <span class="prop-section-title">Auto Layout</span>
             </div>
+            ${nodeInfo.autoLayout ? `
+            <div class="prop-row">
+                <select id="prop-al-dir" class="prop-compact-input" style="flex:1;cursor:pointer">
+                    <option value="horizontal"${nodeInfo.autoLayout.direction === 'horizontal' ? ' selected' : ''}>Horizontal</option>
+                    <option value="vertical"${nodeInfo.autoLayout.direction === 'vertical' ? ' selected' : ''}>Vertical</option>
+                </select>
+                <span class="prop-row-label" style="width:auto;font-size:10px">Gap</span>
+                <input class="prop-compact-input" id="prop-al-spacing" type="number" value="${nodeInfo.autoLayout.spacing}" style="width:40px;flex:0 0 40px" min="0" />
+            </div>
+            <div class="prop-row">
+                <span class="prop-row-label">T</span><input class="prop-compact-input" id="prop-al-pt" type="number" value="${nodeInfo.autoLayout.padTop}" min="0" />
+                <span class="prop-row-label">R</span><input class="prop-compact-input" id="prop-al-pr" type="number" value="${nodeInfo.autoLayout.padRight}" min="0" />
+                <span class="prop-row-label">B</span><input class="prop-compact-input" id="prop-al-pb" type="number" value="${nodeInfo.autoLayout.padBottom}" min="0" />
+                <span class="prop-row-label">L</span><input class="prop-compact-input" id="prop-al-pl" type="number" value="${nodeInfo.autoLayout.padLeft}" min="0" />
+            </div>
+            <div class="prop-row"><button id="prop-al-remove" class="prop-mini-btn" style="color:var(--danger);width:100%">Remove Auto Layout</button></div>
             ` : `
-            <button id="prop-al-add" style="background:#335;color:#aad;border:1px solid #446;padding:4px 12px;border-radius:3px;cursor:pointer;font-size:11px">+ Add Auto Layout</button>
+            <div class="prop-row"><button id="prop-al-add" class="prop-mini-btn" style="color:var(--accent);width:100%">+ Add Auto Layout</button></div>
             `}
         </div>
         ` : ''}
+
         ${nodeInfo.type === 'text' ? `
-        <div class="prop-group">
-            <div class="prop-label">Font</div>
-            <div style="display:flex;gap:6px;align-items:center">
-                <select class="prop-input" id="prop-font-family" style="flex:1;background:#333;color:#ddd;border:1px solid #555;padding:3px 4px;border-radius:3px;font-size:12px">
+        <div class="prop-section">
+            <div class="prop-section-header">
+                <span class="prop-section-title">Text</span>
+            </div>
+            <div class="prop-row">
+                <select class="prop-compact-input" id="prop-font-family" style="flex:2;cursor:pointer">
                     ${['Inter', 'Roboto', 'Poppins', 'Material Symbols Outlined', 'system-ui', 'sans-serif', 'serif', 'monospace'].map(f =>
                         `<option value="${f}" ${(nodeInfo.fontFamily || 'Inter') === f ? 'selected' : ''} style="font-family:'${f}'">${f}</option>`
                     ).join('')}
                 </select>
-                <select class="prop-input" id="prop-font-weight" style="width:70px;background:#333;color:#ddd;border:1px solid #555;padding:3px 4px;border-radius:3px;font-size:12px">
-                    ${[{v:300,l:'Light'},{v:400,l:'Regular'},{v:500,l:'Medium'},{v:600,l:'Semi'},{v:700,l:'Bold'}].map(w =>
+                <select class="prop-compact-input" id="prop-font-weight" style="flex:1;cursor:pointer">
+                    ${[{v:300,l:'Lt'},{v:400,l:'Reg'},{v:500,l:'Med'},{v:600,l:'Semi'},{v:700,l:'Bold'}].map(w =>
                         `<option value="${w.v}" ${(nodeInfo.fontWeight || 400) === w.v ? 'selected' : ''}>${w.l}</option>`
                     ).join('')}
                 </select>
             </div>
-        </div>
-        <div class="prop-group">
-            <div class="prop-label">Font Size</div>
-            <input class="prop-input" id="prop-font-size" type="number" value="${Math.round(nodeInfo.fontSize)}" style="width:60px" min="1" />
-        </div>
-        <div class="prop-group">
-            <div class="prop-label">Typography</div>
-            <div style="display:flex;gap:6px">
-                <label style="font-size:10px;color:#666">Spacing<input class="prop-input" id="prop-letter-spacing" type="number" value="${nodeInfo.letterSpacing || 0}" style="width:50px;margin-left:4px" step="0.5" /></label>
-                <label style="font-size:10px;color:#666">Line H<input class="prop-input" id="prop-line-height" type="number" value="${nodeInfo.lineHeight || 0}" style="width:50px;margin-left:4px" step="1" min="0" /></label>
+            <div class="prop-row">
+                <span class="prop-row-label" style="font-size:9px">Sz</span>
+                <input class="prop-compact-input" id="prop-font-size" type="number" value="${Math.round(nodeInfo.fontSize)}" min="1" style="width:50px;flex:0 0 50px" />
+                <span class="prop-row-label" style="font-size:9px;width:auto">Sp</span>
+                <input class="prop-compact-input" id="prop-letter-spacing" type="number" value="${nodeInfo.letterSpacing || 0}" step="0.5" style="flex:1" />
+                <span class="prop-row-label" style="font-size:9px;width:auto">LH</span>
+                <input class="prop-compact-input" id="prop-line-height" type="number" value="${nodeInfo.lineHeight || 0}" step="1" min="0" style="flex:1" />
             </div>
-        </div>
-        <div class="prop-group">
-            <div class="prop-label">Decoration</div>
-            <div style="display:flex;gap:4px">
-                <button id="prop-dec-none" style="flex:1;padding:3px 6px;border:1px solid ${(nodeInfo.textDecoration || 'none') === 'none' ? '#4285f4' : '#555'};background:${(nodeInfo.textDecoration || 'none') === 'none' ? '#335' : '#2a2a2a'};color:#ddd;border-radius:3px;cursor:pointer;font-size:11px">None</button>
-                <button id="prop-dec-underline" style="flex:1;padding:3px 6px;border:1px solid ${nodeInfo.textDecoration === 'underline' ? '#4285f4' : '#555'};background:${nodeInfo.textDecoration === 'underline' ? '#335' : '#2a2a2a'};color:#ddd;border-radius:3px;cursor:pointer;font-size:11px;text-decoration:underline">U</button>
-                <button id="prop-dec-strike" style="flex:1;padding:3px 6px;border:1px solid ${nodeInfo.textDecoration === 'strikethrough' ? '#4285f4' : '#555'};background:${nodeInfo.textDecoration === 'strikethrough' ? '#335' : '#2a2a2a'};color:#ddd;border-radius:3px;cursor:pointer;font-size:11px;text-decoration:line-through">S</button>
+            <div class="prop-row" style="gap:2px">
+                <button id="prop-dec-none" class="prop-mini-btn ${(nodeInfo.textDecoration || 'none') === 'none' ? 'active' : ''}" style="flex:1">None</button>
+                <button id="prop-dec-underline" class="prop-mini-btn ${nodeInfo.textDecoration === 'underline' ? 'active' : ''}" style="flex:1;text-decoration:underline">U</button>
+                <button id="prop-dec-strike" class="prop-mini-btn ${nodeInfo.textDecoration === 'strikethrough' ? 'active' : ''}" style="flex:1;text-decoration:line-through">S</button>
+                <span style="width:8px"></span>
+                <button id="prop-va-top" class="prop-mini-btn ${(nodeInfo.textVerticalAlign || 'top') === 'top' ? 'active' : ''}" style="flex:1">T</button>
+                <button id="prop-va-center" class="prop-mini-btn ${nodeInfo.textVerticalAlign === 'center' ? 'active' : ''}" style="flex:1">M</button>
+                <button id="prop-va-bottom" class="prop-mini-btn ${nodeInfo.textVerticalAlign === 'bottom' ? 'active' : ''}" style="flex:1">B</button>
             </div>
-        </div>
-        <div class="prop-group">
-            <div class="prop-label">Vertical Align</div>
-            <div style="display:flex;gap:4px">
-                <button id="prop-va-top" style="flex:1;padding:3px 6px;border:1px solid ${(nodeInfo.textVerticalAlign || 'top') === 'top' ? '#4285f4' : '#555'};background:${(nodeInfo.textVerticalAlign || 'top') === 'top' ? '#335' : '#2a2a2a'};color:#ddd;border-radius:3px;cursor:pointer;font-size:11px">Top</button>
-                <button id="prop-va-center" style="flex:1;padding:3px 6px;border:1px solid ${nodeInfo.textVerticalAlign === 'center' ? '#4285f4' : '#555'};background:${nodeInfo.textVerticalAlign === 'center' ? '#335' : '#2a2a2a'};color:#ddd;border-radius:3px;cursor:pointer;font-size:11px">Mid</button>
-                <button id="prop-va-bottom" style="flex:1;padding:3px 6px;border:1px solid ${nodeInfo.textVerticalAlign === 'bottom' ? '#4285f4' : '#555'};background:${nodeInfo.textVerticalAlign === 'bottom' ? '#335' : '#2a2a2a'};color:#ddd;border-radius:3px;cursor:pointer;font-size:11px">Bot</button>
+            <div style="padding:4px 12px 8px">
+                <textarea id="prop-text" class="prop-compact-input" style="width:100%;min-height:40px;resize:vertical;border:1px solid var(--border-default);padding:6px">${nodeInfo.text}</textarea>
             </div>
-        </div>
-        <div class="prop-group">
-            <div class="prop-label">Text</div>
-            <textarea id="prop-text" class="prop-input" style="width:100%;min-height:48px;resize:vertical;font-family:monospace;font-size:12px">${nodeInfo.text}</textarea>
         </div>
         ` : ''}
     `;
@@ -2597,9 +2750,12 @@ function updatePropertiesPanel(): void {
 
     // Opacity slider — use 'input' for live feedback
     const opacityEl = document.getElementById('prop-opacity') as HTMLInputElement;
+    const opacityValEl = document.getElementById('prop-opacity-val');
     if (opacityEl) {
         opacityEl.addEventListener('input', () => {
-            app.set_node_opacity(counter, clientId, parseInt(opacityEl.value) / 100);
+            const v = parseInt(opacityEl.value);
+            app.set_node_opacity(counter, clientId, v / 100);
+            if (opacityValEl) opacityValEl.textContent = `${v}%`;
             render();
         });
     }

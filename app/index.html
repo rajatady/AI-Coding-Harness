@@ -10,35 +10,55 @@
 </head>
 <body>
     <div id="app">
-        <div id="toolbar">
-            <button class="tool-btn" data-action="add-frame">Frame</button>
-            <button class="tool-btn" data-action="add-rect">Rectangle</button>
-            <button class="tool-btn" data-action="add-ellipse">Ellipse</button>
-            <button class="tool-btn" data-action="add-text">Text</button>
-            <button class="tool-btn" data-action="add-star">Star</button>
-            <button class="tool-btn" data-action="add-polygon">Polygon</button>
-            <button class="tool-btn" data-action="pen">Pen</button>
-            <button class="tool-btn" data-action="delete">Delete</button>
-            <button class="tool-btn" data-action="add-image">Image</button>
-            <button class="tool-btn" data-action="export-png">Export PNG</button>
-            <button class="tool-btn" data-action="export-svg">Export SVG</button>
-            <button class="tool-btn" data-action="import-fig">Import</button>
-            <input type="file" id="image-file-input" accept="image/*" style="display:none" />
-            <input type="file" id="fig-file-input" accept=".json,.fig" style="display:none" />
-            <span id="info">Loading...</span>
-            <span id="coords" style="margin-left:12px;color:#888;font-size:11px;"></span>
-        </div>
         <div id="workspace">
             <div id="layers-panel" class="panel panel-left">
-                <div class="panel-header">Layers</div>
-                <div id="page-tabs"></div>
-                <div id="layers-list"></div>
+                <div id="pages-section">
+                    <div class="section-header" id="pages-header">
+                        <span class="section-title">Pages</span>
+                        <span class="section-action" id="add-page-btn">+</span>
+                    </div>
+                    <div id="page-list"></div>
+                </div>
+                <div id="layers-section">
+                    <div class="section-header" id="layers-header">
+                        <span class="section-title">Layers</span>
+                    </div>
+                    <div id="layers-list"></div>
+                </div>
             </div>
             <canvas id="canvas"></canvas>
             <div id="properties-panel" class="panel panel-right">
                 <div class="panel-header">Properties</div>
                 <div id="properties-content"></div>
             </div>
+        </div>
+        <div id="toolbar">
+            <div class="tool-group">
+                <button class="tool-btn" data-action="add-frame" title="Frame (F)">Frame</button>
+                <button class="tool-btn" data-action="add-rect" title="Rectangle (R)">Rect</button>
+                <button class="tool-btn" data-action="add-ellipse" title="Ellipse (O)">Ellipse</button>
+                <button class="tool-btn" data-action="add-text" title="Text (T)">Text</button>
+                <button class="tool-btn" data-action="add-star" title="Star (S)">Star</button>
+                <button class="tool-btn" data-action="add-polygon" title="Polygon">Poly</button>
+                <button class="tool-btn" data-action="pen" title="Pen (P)">Pen</button>
+            </div>
+            <div class="tool-separator"></div>
+            <div class="tool-group">
+                <button class="tool-btn" data-action="delete" title="Delete (⌫)">Del</button>
+                <button class="tool-btn" data-action="add-image" title="Image">Img</button>
+            </div>
+            <div class="tool-separator"></div>
+            <div class="tool-group">
+                <button class="tool-btn tool-btn-secondary" data-action="export-png">PNG</button>
+                <button class="tool-btn tool-btn-secondary" data-action="export-svg">SVG</button>
+                <button class="tool-btn tool-btn-secondary" data-action="import-fig">Import</button>
+            </div>
+            <input type="file" id="image-file-input" accept="image/*" style="display:none" />
+            <input type="file" id="fig-file-input" accept=".json,.fig" style="display:none" />
+        </div>
+        <div id="status-bar">
+            <span id="info">Loading...</span>
+            <span id="coords"></span>
         </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
