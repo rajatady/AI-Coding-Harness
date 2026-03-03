@@ -11,6 +11,7 @@
     "vite": "^6.0.0"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "puppeteer": "^24.37.5"
   }
 }

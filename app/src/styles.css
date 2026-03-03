@@ -718,6 +718,22 @@ body {
     display: flex; align-items: center; gap: 5px;
     font-size: 11px; color: var(--indigo); font-weight: 500;
 }
+.ai-msg-avatar.ai-thinking {
+    animation: aiPulse 1.2s ease-in-out infinite;
+}
+.ai-dots::after {
+    content: '...'; animation: aiDots 1.5s steps(4) infinite;
+}
+@keyframes aiPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+@keyframes aiDots {
+    0% { content: ''; }
+    25% { content: '.'; }
+    50% { content: '..'; }
+    75% { content: '...'; }
+}
 .ai-msg-user {
     display: flex; justify-content: flex-end;
     animation: fadeIn 0.3s ease-out;
@@ -895,6 +911,46 @@ body {
 }
 .prop-fill-opacity {
     font-size: 10px; color: var(--text-tertiary);
+}
+
+/* Fill entry row */
+.prop-fill-entry {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 7px; background: var(--fill3);
+    border-radius: 6px; border: 0.5px solid var(--sep);
+    margin: 0 12px 4px;
+}
+.prop-fill-type-select {
+    background: var(--fill2); border: 0.5px solid var(--sep);
+    color: var(--text-secondary); border-radius: 4px;
+    padding: 2px 4px; font-size: 10px; font-family: var(--font);
+    cursor: pointer; outline: none; flex-shrink: 0;
+}
+.prop-fill-type-select:hover { border-color: var(--border-strong); }
+.prop-fill-type-select:focus { border-color: var(--accent); }
+.prop-fill-delete { padding: 2px 5px; font-size: 12px; line-height: 1; }
+
+/* Gradient stop editor */
+.gradient-stop-wrap {
+    margin: 0 12px 6px; padding: 0 7px;
+}
+.gradient-stop-bar {
+    position: relative; height: 20px; border-radius: 4px;
+    border: 0.5px solid var(--sep); cursor: pointer;
+    box-shadow: inset 0 0.5px 1px rgba(255,255,255,0.05);
+}
+.gradient-stop-handle {
+    position: absolute; top: 50%; width: 12px; height: 12px;
+    border-radius: 50%; border: 2px solid var(--bg-surface);
+    transform: translate(-50%, -50%); cursor: grab;
+    box-shadow: 0 0 0 1px var(--sep), 0 1px 3px rgba(0,0,0,0.3);
+    transition: box-shadow 0.15s var(--ease);
+    z-index: 1;
+}
+.gradient-stop-handle:hover { box-shadow: 0 0 0 1px var(--text-ghost), 0 1px 4px rgba(0,0,0,0.4); }
+.gradient-stop-handle.selected { box-shadow: 0 0 0 2px var(--accent), 0 1px 4px rgba(10,132,255,0.3); }
+.gradient-stop-color-row {
+    margin: 4px 0 0; gap: 6px;
 }
 
 /* Effect row */

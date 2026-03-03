@@ -46,7 +46,7 @@ async function run() {
         browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
         const page = await browser.newPage();
         await page.setViewport({ width: 1400, height: 900 });
-        await page.goto(`http://localhost:${PORT}?nostress`, { waitUntil: 'networkidle0', timeout: 30000 });
+        await page.goto(`http://localhost:${PORT}?nostress&nosave`, { waitUntil: 'networkidle0', timeout: 30000 });
 
         // Wait for WASM to load
         await page.waitForFunction(() => window._app && window._render, { timeout: 15000 });

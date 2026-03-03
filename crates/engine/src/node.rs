@@ -75,6 +75,9 @@ pub struct TextRun {
     pub letter_spacing: f32,
     pub line_height: Option<f32>, // None = auto
     pub decoration: TextDecoration,
+    /// Override fill for gradient text. When Some, renderer uses this instead of `color`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill_override: Option<Paint>,
 }
 
 /// Text auto-resize behavior.
@@ -327,6 +330,7 @@ impl Node {
                     letter_spacing: 0.0,
                     line_height: None,
                     decoration: TextDecoration::None,
+                    fill_override: None,
                 }],
                 align: TextAlign::Left,
                 vertical_align: TextVerticalAlign::Top,

@@ -607,3 +607,170 @@ fn p8_80k_objects_render_time() {
         eprintln!("  (skipping assert in debug mode — run with --release for accurate perf)");
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHASE 9: Vector paths (pen tool, Starbucks logo complexity)
+// ═══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn p9_vector_path_with_bezier_curves() {
+    use figma_engine::node::{NodeKind, PathCommand, VectorPath};
+    use figma_engine::properties::FillRule;
+    use glam::Vec2;
+    let mut tree = DocumentTree::new();
+    let mut clock = ClockGen::new(0);
+    let root = tree.root_id();
+
+    // Create a vector node with bezier curves (simplified logo shape)
+    let vec_id = clock.next_node_id();
+    let commands = vec![
+        PathCommand::MoveTo(Vec2::new(60.0, 0.0)),
+        PathCommand::CubicTo { control1: Vec2::new(80.0, 20.0), control2: Vec2::new(100.0, 40.0), to: Vec2::new(120.0, 20.0) },
+        PathCommand::CubicTo { control1: Vec2::new(100.0, 60.0), control2: Vec2::new(80.0, 80.0), to: Vec2::new(60.0, 100.0) },
+        PathCommand::CubicTo { control1: Vec2::new(40.0, 80.0), control2: Vec2::new(20.0, 60.0), to: Vec2::new(0.0, 20.0) },
+        PathCommand::CubicTo { control1: Vec2::new(20.0, 40.0), control2: Vec2::new(40.0, 20.0), to: Vec2::new(60.0, 0.0) },
+        PathCommand::Close,
+    ];
+    let path = VectorPath { commands: commands.clone(), fill_rule: FillRule::NonZero };
+
+    let mut vec_node = Node::rectangle(vec_id, "LogoShape", 120.0, 100.0);
+    vec_node.kind = NodeKind::Vector { paths: vec![path] };
+    vec_node.style.fills.push(Paint::Solid(Color::new(0.0, 0.4, 0.2, 1.0)));
+    tree.insert(vec_node, root, 0).unwrap();
+
+    // Verify path commands stored correctly
+    let node = tree.get(&vec_id).unwrap();
+    match &node.kind {
+        NodeKind::Vector { paths } => {
+            assert_eq!(paths[0].commands.len(), 6, "path commands count mismatch");
+        }
+        _ => panic!("expected vector node"),
+    }
+
+    // Render and verify green pixels appear
+    let viewport = figma_renderer::scene::AABB::new(
+        glam::Vec2::ZERO,
+        glam::Vec2::new(200.0, 200.0),
+    );
+    let output = figma_renderer::pipeline::render(&tree, &root, viewport);
+    let pixels = output.to_pixels(200, 200);
+
+    // Check center of shape for green fill
+    let mut found_green = false;
+    for y in 30..70 {
+        for x in 40..80 {
+            let idx = (y * 200 + x) as usize * 4;
+            let (r, g, b, a) = (pixels[idx], pixels[idx+1], pixels[idx+2], pixels[idx+3]);
+            if a > 128 && g > r && g > b {
+                found_green = true;
+            }
+        }
+    }
+    assert!(found_green, "Vector shape with green fill should have green pixels in center region");
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHASE 10: Gradient fills (linear + radial)
+// ═══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn p10_linear_gradient_fill() {
+    let mut tree = DocumentTree::new();
+    let mut clock = ClockGen::new(0);
+    let root = tree.root_id();
+
+    let rect_id = clock.next_node_id();
+    let mut rect = Node::rectangle(rect_id, "GradientRect", 200.0, 100.0);
+    rect.transform = Transform::translate(0.0, 0.0);
+
+    // Linear gradient: red on left, blue on right
+    // Gradient start/end are in normalized 0-1 space (Figma convention)
+    rect.style.fills.push(Paint::LinearGradient {
+        stops: vec![
+            GradientStop::new(0.0, Color::new(1.0, 0.0, 0.0, 1.0)),
+            GradientStop::new(1.0, Color::new(0.0, 0.0, 1.0, 1.0)),
+        ],
+        start: glam::Vec2::new(0.0, 0.5),
+        end: glam::Vec2::new(1.0, 0.5),
+    });
+    tree.insert(rect, root, 0).unwrap();
+
+    let viewport = figma_renderer::scene::AABB::new(
+        glam::Vec2::ZERO,
+        glam::Vec2::new(200.0, 100.0),
+    );
+    let output = figma_renderer::pipeline::render(&tree, &root, viewport);
+    let pixels = output.to_pixels(200, 100);
+
+    // Left side (x=10) should be red-ish
+    let left_idx = (50 * 200 + 10) as usize * 4;
+    assert!(pixels[left_idx] > 128, "Left side should have high red, got r={}", pixels[left_idx]);
+
+    // Right side (x=190) should be blue-ish
+    let right_idx = (50 * 200 + 190) as usize * 4;
+    assert!(pixels[right_idx + 2] > 128, "Right side should have high blue, got b={}", pixels[right_idx + 2]);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHASE 11: 10,000 artboards (Rajat's bar)
+// ═══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn p11_ten_thousand_artboards() {
+    let mut tree = DocumentTree::new();
+    let mut clock = ClockGen::new(0);
+    let root = tree.root_id();
+
+    let start = std::time::Instant::now();
+    for i in 0..10_000u32 {
+        let id = clock.next_node_id();
+        let mut frame = Node::frame(id, &format!("A{}", i), 1440.0, 900.0);
+        frame.transform = Transform::translate((i % 50) as f32 * 1500.0, (i / 50) as f32 * 960.0);
+        frame.style.fills.push(Paint::Solid(Color::new(1.0, 1.0, 1.0, 1.0)));
+        tree.insert(frame, root, i as usize).unwrap();
+    }
+    let create_ms = start.elapsed().as_millis();
+    eprintln!("10K artboards created in {}ms", create_ms);
+    assert_eq!(tree.node_count(), 10_001);
+
+    // Render a small viewport — should be fast due to viewport culling
+    let viewport = figma_renderer::scene::AABB::new(
+        glam::Vec2::ZERO,
+        glam::Vec2::new(3000.0, 1920.0),
+    );
+    let start = std::time::Instant::now();
+    let output = figma_renderer::pipeline::render(&tree, &root, viewport);
+    let render_ms = start.elapsed().as_millis();
+    eprintln!("10K artboards render: {} items in {}ms", output.item_count, render_ms);
+
+    // Must create in <5s and render viewport in <500ms
+    assert!(create_ms < 5000, "10K artboard creation too slow: {}ms", create_ms);
+    assert!(render_ms < 500, "10K artboard render too slow: {}ms", render_ms);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHASE 12: Masks (essential for Apple website hero images)
+// ═══════════════════════════════════════════════════════════════════════
+
+// #[test]
+// fn p12_mask_clips_child_to_shape() {
+//     // A circle mask that clips a rectangular image to a circle.
+//     // Pixels outside the circle should be transparent.
+//     // This is how Apple renders product images with rounded masks.
+//     //
+//     // BLOCKED: mask system not yet implemented.
+//     // Uncomment when NodeKind::BooleanGroup or mask properties are ready.
+// }
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHASE 13: Boolean operations (union, subtract, intersect)
+// ═══════════════════════════════════════════════════════════════════════
+
+// #[test]
+// fn p13_boolean_subtract() {
+//     // Subtract a circle from a rectangle to create a cutout shape.
+//     // The Apple website uses boolean ops for icons and decorative shapes.
+//     //
+//     // BLOCKED: boolean operations not yet implemented.
+//     // Uncomment when boolean_subtract(tree, shape_a, shape_b) is ready.
+// }

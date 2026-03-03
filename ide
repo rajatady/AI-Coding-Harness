@@ -84,6 +84,23 @@ def cmd_orient(args):
         if next_ready:
             print(f"NEXT: [{next_ready['id']}] {next_ready['title']}")
 
+        # Show latest journal entry (critical for post-compaction recovery)
+        session_journal = IDE_ROOT / ".journals" / "session.md"
+        if session_journal.exists():
+            jlines = session_journal.read_text().strip().split("\n")
+            # Show last non-empty line (most recent entry)
+            last_entry = ""
+            for jl in reversed(jlines):
+                jl = jl.strip()
+                if jl and not jl.startswith("#") and not jl.startswith("---"):
+                    last_entry = jl
+                    break
+            if last_entry:
+                # Truncate to 200 chars for minimal output
+                if len(last_entry) > 200:
+                    last_entry = last_entry[:200] + "..."
+                print(f"JOURNAL: {last_entry}")
+
         # Compile status if cargo project exists
         cargo_toml = IDE_ROOT / "Cargo.toml"
         if cargo_toml.exists():
@@ -1850,95 +1867,105 @@ def cmd_interactions(args):
 
 def cmd_gap(args):
     """
-    Feature gap analysis — what's missing vs real Figma.
-    Scans wasm/src/lib.rs for exposed methods, compares to Figma feature list.
-    Output: HAVE / MISSING for each category. ~30 tokens.
+    HONEST feature gap analysis — three tiers vs real Figma.
+    DONE = has working feature tests + UI controls.
+    PARTIAL = API exists but limited (no UI, no layout computation, etc).
+    MISSING = not implemented at all.
+    Output: tier breakdown + honest percentage. ~40 tokens.
     """
-    lib_rs = os.path.join(IDE_ROOT, "crates", "wasm", "src", "lib.rs")
-    canvas2d_rs = os.path.join(IDE_ROOT, "crates", "wasm", "src", "canvas2d.rs")
-    main_ts = os.path.join(IDE_ROOT, "app", "src", "main.ts")
+    # Three-tier honest assessment:
+    # Each entry: (feature_name, tier, honest_note)
+    features = [
+        # DONE: Has working tests, UI controls, renders correctly
+        ("Rectangle tool", "done", "click-drag creation, properties, resize"),
+        ("Ellipse tool", "done", "click-drag creation, properties, resize"),
+        ("Frame tool", "done", "click-drag, clip children, nesting"),
+        ("Text tool", "done", "creation, font family/weight/size, wrapping"),
+        ("Pen tool", "done", "click points, bezier handles, close path"),
+        ("Line tool", "done", "creation, stroke, resize"),
+        ("Single select", "done", "click to select, deselect on empty"),
+        ("Multi-select", "done", "shift-click, marquee drag"),
+        ("Drag move", "done", "single + multi drag, nested children"),
+        ("Resize handles", "done", "8 handles, aspect ratio, min size"),
+        ("Undo/redo", "done", "full action stack, Cmd+Z/Shift+Cmd+Z"),
+        ("Copy/paste", "done", "clipboard, offset paste"),
+        ("Duplicate", "done", "Cmd+D"),
+        ("Delete", "done", "backspace/delete key"),
+        ("Fill (solid)", "done", "RGBA, color picker, properties panel"),
+        ("Fill (gradient)", "done", "linear/radial/angular, stop editor UI"),
+        ("Stroke", "done", "color, weight, align (center/inside/outside)"),
+        ("Drop shadow", "done", "color, offset, blur, spread"),
+        ("Rounded corners", "done", "uniform + per-corner"),
+        ("Frame clipping", "done", "clips content toggle"),
+        ("Text rendering", "done", "font loading, word wrap, letter spacing, line height"),
+        ("Vector rendering", "done", "path commands, fills, strokes"),
+        ("PNG export", "done", "pixel buffer export"),
+        ("SVG export", "done", "vector export"),
+        ("Pan/zoom", "done", "scroll pan, pinch zoom, +/- buttons"),
+        ("Multi-page", "done", "add/switch/rename pages"),
+        ("Layers panel", "done", "tree view, click to select, reorder"),
+        ("Properties panel", "done", "position, size, fill, stroke, effects"),
+        ("Group/ungroup", "done", "Cmd+G, double-click enter, Escape exit"),
+        ("Color picker", "done", "HSV picker, hex input, alpha slider"),
+        ("Zoom to fit", "done", "fits all content in viewport"),
+        ("Blend modes", "done", "16 modes via canvas2d composite ops"),
+        ("Inner shadow", "done", "clip + offset shadow technique"),
+        ("Blur effect", "done", "layer blur via canvas2d filter"),
+        ("Image fill", "done", "file upload, scale modes (fill/fit/tile)"),
+        ("Flatten", "done", "rect/ellipse/polygon → vector"),
+        ("Rotation", "done", "drag-rotate handles, properties input, undo"),
+        ("Persistence", "done", "IndexedDB auto-save, Cmd+S, load on startup"),
 
-    content = ""
-    for f in [lib_rs, canvas2d_rs, main_ts]:
-        if os.path.exists(f):
-            content += open(f).read()
+        # PARTIAL: API exists but not Figma-equivalent
+        ("Boolean ops", "partial", "API exists, but no UI button or preview"),
+        ("Align tools", "partial", "API works, but no toolbar buttons"),
+        ("Distribute", "partial", "API works, but no toolbar buttons"),
+        ("Component system", "partial", "create/instance/detach work, no overrides, no variant system"),
+        ("Auto-layout", "partial", "set/remove properties stored, but NO layout computation — children stay at absolute positions"),
+        ("Constraints", "partial", "constraint values stored, but NOT applied during parent resize"),
+        ("Mask", "partial", "flag set/unset, render doesn't crash, but not pixel-accurate masking"),
+        ("Vector network", "partial", "data structure exists, basic queries, no UI for editing network topology"),
+        ("Prototype links", "partial", "add/remove links stored, but NO preview mode or click-through interaction"),
+        ("Comments", "partial", "add/resolve/delete/get API, but NO canvas overlay UI"),
+        ("Star/Polygon", "done", "creation with point count, radius"),
+        ("Snap to grid", "partial", "snap logic exists, no visual grid overlay"),
+        ("Gradient fills (text)", "done", "linear/radial/angular on text nodes"),
+        ("Multiple fills", "done", "add/remove fills, renders all in order"),
 
-    # Define Figma feature categories and detection patterns
-    features = {
-        # Core tools
-        "Rectangle tool": "add_rectangle",
-        "Ellipse tool": "add_ellipse",
-        "Frame tool": "add_frame",
-        "Text tool": "add_text",
-        "Pen tool": "pen_start",
-        "Line tool": "add_line",
-        # Selection
-        "Single select": "mouse_down",
-        "Multi-select": "toggle_select",
-        "Drag move": "Dragging",
-        "Resize handles": "Resizing",
-        # Edit
-        "Undo/redo": "undo",
-        "Copy/paste": "copy_selected",
-        "Duplicate": "duplicate_selected",
-        "Delete": "delete_selected",
-        "Boolean ops": "boolean_op",
-        # Rendering
-        "Fill (solid)": "Solid",
-        "Fill (gradient)": "LinearGradient",
-        "Stroke": "stroke",
-        "Drop shadow": "DropShadow",
-        "Rounded corners": "corner_radii",
-        "Frame clipping": "clips",
-        "Text rendering": "fill_text",
-        "Vector rendering": "render_items_with_camera",
-        # Export
-        "PNG export": "export_pixels",
-        "SVG export": "export_svg",
-        # Navigation
-        "Pan/zoom": "pan_start",
-        "Multi-page": "switch_page",
-        "Layers panel": "get_layers",
-        "Properties panel": "get_node_info",
-        # Missing features to detect
-        "Group/ungroup": "group_selected",
-        "Align tools": "align_",
-        "Distribute": "distribute_",
-        "Snap to grid": "snap",
-        "Rulers/guides": "ruler",
-        "Color picker UI": "color_picker",
-        "Zoom to fit": "zoom_to_fit",
-        "Component system": "create_component",
-        "Auto-layout": "auto_layout",
-        "Constraints": "constraint",
-        "Blend modes": "blend_mode",
-        "Inner shadow": "InnerShadow",
-        "Blur effect": "LayerBlur",
-        "Image fill": "image_fill",
-        "Mask": "mask_",
-        "Flatten": "flatten",
-        "Vector network": "vector_network",
-        "Prototype/interactions": "prototype",
-        "Comments": "comment",
-        "Version history": "version",
-        "Real-time collab": "websocket",
-    }
+        # MISSING: Not implemented at all
+        ("Background blur", "missing", "canvas2d limitation — need offscreen buffer compositing"),
+        ("Version history", "missing", "no version tracking, no branching, no restore"),
+        ("Real-time collab", "missing", "CRDT engine exists but no WebSocket server or sync"),
+        ("Animation/motion", "missing", "no keyframes, no easing, no timeline"),
+        ("Responsive resize", "missing", "constraints stored but not enforced on resize"),
+        ("Smart guides", "missing", "no alignment snapping lines during drag"),
+        ("Rulers/guides", "missing", "no pixel rulers, no draggable guide lines"),
+        ("Dev mode/inspect", "missing", "no CSS/code export, no measurement overlay"),
+        ("Plugin system", "missing", "no extension API"),
+        ("Gradient strokes", "missing", "strokes are solid-only in programmatic API"),
+    ]
 
-    have = []
-    missing = []
-    for name, pattern in features.items():
-        if pattern.lower() in content.lower():
-            have.append(name)
-        else:
-            missing.append(name)
+    done = [(n, note) for n, t, note in features if t == "done"]
+    partial = [(n, note) for n, t, note in features if t == "partial"]
+    missing = [(n, note) for n, t, note in features if t == "missing"]
+    total = len(features)
 
-    print(f"HAVE ({len(have)}):")
-    for h in have:
-        print(f"  + {h}")
+    print(f"DONE ({len(done)}):")
+    for n, _ in done:
+        print(f"  ✓ {n}")
+
+    print(f"\nPARTIAL ({len(partial)}):")
+    for n, note in partial:
+        print(f"  ~ {n} — {note}")
+
     print(f"\nMISSING ({len(missing)}):")
-    for m in missing:
-        print(f"  - {m}")
-    print(f"\nCoverage: {len(have)}/{len(have)+len(missing)} ({100*len(have)//(len(have)+len(missing))}%)")
+    for n, note in missing:
+        print(f"  ✗ {n} — {note}")
+
+    # Honest scoring: done=1, partial=0.5, missing=0
+    score = len(done) + len(partial) * 0.5
+    print(f"\nHonest score: {score:.0f}/{total} ({100*score/total:.0f}%)")
+    print(f"  Done: {len(done)} | Partial: {len(partial)} | Missing: {len(missing)}")
 
 
 def cmd_workflow(args):

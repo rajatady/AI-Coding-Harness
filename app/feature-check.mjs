@@ -95,7 +95,7 @@ async function main() {
 
         // Load with ?nostress for fast startup (no 2M nodes)
         console.log('FEAT: Loading app (lightweight mode)...');
-        await page.goto(`http://localhost:${PORT}/?nostress`, {
+        await page.goto(`http://localhost:${PORT}/?nostress&nosave`, {
             waitUntil: 'networkidle2', timeout: TIMEOUT
         });
         await page.waitForFunction(
@@ -1612,6 +1612,86 @@ async function main() {
                 if (!id || id.length !== 2) return `add_image_fill failed for mode ${mode}`;
             }
             return true;
+        });
+
+        // ═══════════════════════════════════════════════════════════
+        // GRADIENT FILL APIs
+        // ═══════════════════════════════════════════════════════════
+
+        await t('gradient.set_linear', () => {
+            const app = window._app;
+            const id = app.add_rectangle('GradLinTest', -32000, -32000, 100, 100, 0.5, 0.5, 0.5, 1.0);
+            const ok = app.set_node_linear_gradient(id[0], id[1],
+                0, 0, 1, 1,
+                [0.0, 1.0], [1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0]);
+            return ok === true;
+        });
+
+        await t('gradient.set_radial', () => {
+            const app = window._app;
+            const id = app.add_ellipse('GradRadTest', -32200, -32000, 100, 100, 0.5, 0.5, 0.5, 1.0);
+            const ok = app.set_node_radial_gradient(id[0], id[1],
+                0.5, 0.5, 0.5,
+                [0.0, 1.0], [1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]);
+            return ok === true;
+        });
+
+        await t('gradient.set_angular', () => {
+            const app = window._app;
+            const id = app.add_rectangle('GradAngTest', -32400, -32000, 100, 100, 0.5, 0.5, 0.5, 1.0);
+            const ok = app.set_node_angular_gradient(id[0], id[1],
+                0.5, 0.5, 0.0,
+                [0.0, 0.5, 1.0], [1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0]);
+            return ok === true;
+        });
+
+        await t('gradient.add_fill_multiple', () => {
+            const app = window._app;
+            const id = app.add_rectangle('MultiFillTest', -32600, -32000, 100, 100, 1.0, 0.0, 0.0, 0.5);
+            const ok1 = app.add_node_fill(id[0], id[1], 0.0, 0.0, 1.0, 0.3);
+            const ok2 = app.add_node_linear_gradient(id[0], id[1],
+                0, 0, 1, 0,
+                [0.0, 1.0], [0.0, 1.0, 0.0, 0.5, 1.0, 1.0, 0.0, 0.5]);
+            return ok1 === true && ok2 === true;
+        });
+
+        await t('gradient.add_radial_to_existing', () => {
+            const app = window._app;
+            const id = app.add_ellipse('RadialAddTest', -32800, -32000, 80, 80, 0.2, 0.2, 0.2, 1.0);
+            const ok = app.add_node_radial_gradient(id[0], id[1],
+                0.5, 0.5, 0.5,
+                [0.0, 1.0], [1.0, 1.0, 1.0, 0.8, 1.0, 1.0, 1.0, 0.0]);
+            return ok === true;
+        });
+
+        // ═══════════════════════════════════════════════════════════
+        // GRADIENT TEXT
+        // ═══════════════════════════════════════════════════════════
+
+        await t('gradient.text_linear', () => {
+            const app = window._app;
+            const id = app.add_text('GradTextLin', 'Gradient Text', -33000, -32000, 24, 1, 1, 1, 1);
+            const ok = app.set_text_gradient_fill(id[0], id[1], 'linear',
+                [0, 0, 1, 1],
+                [0.0, 1.0], [1.0, 0.5, 0.0, 1.0, 1.0, 0.0, 0.5, 1.0]);
+            return ok === true;
+        });
+
+        await t('gradient.text_radial', () => {
+            const app = window._app;
+            const id = app.add_text('GradTextRad', 'Radial Text', -33200, -32000, 24, 1, 1, 1, 1);
+            const ok = app.set_text_gradient_fill(id[0], id[1], 'radial',
+                [0.5, 0.5, 0.5],
+                [0.0, 1.0], [1.0, 0.8, 0.0, 1.0, 0.5, 0.0, 0.8, 1.0]);
+            return ok === true;
+        });
+
+        await t('gradient.text_invalid', () => {
+            const app = window._app;
+            const id = app.add_rectangle('NotText', -33400, -32000, 50, 50, 0.5, 0.5, 0.5, 1);
+            const ok = app.set_text_gradient_fill(id[0], id[1], 'linear',
+                [0, 0, 1, 1], [0, 1], [1, 0, 0, 1, 0, 0, 1, 1]);
+            return ok === false; // should fail on non-text node
         });
 
         // ═══════════════════════════════════════════════════════════

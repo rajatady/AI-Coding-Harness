@@ -4,6 +4,8 @@
  */
 
 import init, {FigmaApp} from '../pkg/figma_wasm.js';
+import { initAI } from './ai.js';
+import { TOOL_DEFS, executeTool } from './tools.js';
 
 await init();
 
@@ -12,6 +14,72 @@ const app = new FigmaApp("Untitled", 1);
 (window as any)._app = app;
 (window as any)._updatePageTabs = () => updatePageList();
 (window as any)._render = (force?: boolean) => render(force ?? true);
+
+// ─── Persistence: IndexedDB save/load ───
+const DB_NAME = 'figma-clone';
+const DB_STORE = 'documents';
+const DB_KEY = 'current';
+
+function openDB(): Promise<IDBDatabase> {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = () => { req.result.createObjectStore(DB_STORE); };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+let saveTimer: number | null = null;
+let lastSaveTime = 0;
+
+async function saveDocument() {
+    try {
+        const json = app.export_document_json();
+        if (json.startsWith('{"error"')) return;
+        const db = await openDB();
+        const tx = db.transaction(DB_STORE, 'readwrite');
+        tx.objectStore(DB_STORE).put(json, DB_KEY);
+        await new Promise<void>((resolve, reject) => {
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        });
+        lastSaveTime = Date.now();
+        db.close();
+    } catch (e) {
+        console.warn('Save failed:', e);
+    }
+}
+
+async function loadDocument(): Promise<boolean> {
+    try {
+        const db = await openDB();
+        const tx = db.transaction(DB_STORE, 'readonly');
+        const req = tx.objectStore(DB_STORE).get(DB_KEY);
+        const json = await new Promise<string | undefined>((resolve, reject) => {
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+        db.close();
+        if (!json) return false;
+        const result = JSON.parse(app.import_document_json(json));
+        return result.ok === true;
+    } catch (e) {
+        console.warn('Load failed:', e);
+        return false;
+    }
+}
+
+function scheduleSave() {
+    // export_document_json serializes ALL pages — check total, not just current page
+    if (app.total_node_count() > 10000) return;
+    if ((window as any)._aiProcessing) return;
+    if (saveTimer !== null) clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(() => { saveTimer = null; saveDocument(); }, 2000);
+}
+
+// Expose for headless testing
+(window as any)._saveDocument = saveDocument;
+(window as any)._loadDocument = loadDocument;
 
 const canvas = document.getElementById('canvas') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d')!;
@@ -50,9 +118,6 @@ const layersToggle = document.getElementById('layers-toggle')!;
 
 // ─── AI panel elements ───
 const aiPanel = document.getElementById('ai-panel')!;
-const aiMessages = document.getElementById('ai-messages')!;
-const aiInput = document.getElementById('ai-input') as HTMLInputElement;
-const aiSendBtn = document.getElementById('ai-send-btn')!;
 const toolbarAiBtn = document.getElementById('toolbar-ai-btn')!;
 
 // ─── App mode state ───
@@ -680,6 +745,411 @@ app.add_text("Inter-5", "• Cmd+C copy, Cmd+V paste, Cmd+D duplicate", 20, 125,
 app.add_text("Inter-6", "• Scroll to pan, Ctrl+scroll to zoom, Cmd+1 zoom to fit", 20, 145, 14.0, 0.3, 0.3, 0.3, 1.0);
 app.clear_insert_parent();
 
+// ─── Page 6: VOID — Editorial Experience Studio ─────────────────────
+const voidPage = app.add_page("VOID — Editorial");
+app.switch_page(voidPage);
+
+// --- Frame 1: 01 — VOID · Hero ---
+const f1 = app.add_frame("01 — VOID · Hero", 0, 0, 1440, 900, 0.008, 0.008, 0.024, 1.0);
+app.set_insert_parent(f1[0], f1[1]);
+// Atmospheric orbs with radial gradients (bright center → transparent edge)
+const v0_0 = app.add_ellipse("Orb-Amber", 750, -150, 600, 600, 0, 0, 0, 0);
+app.set_node_radial_gradient(v0_0[0], v0_0[1], 0.5, 0.5, 0.5,
+    [0.0, 0.6, 1.0], [0.45, 0.20, 0.05, 0.6,  0.45, 0.20, 0.05, 0.2,  0.45, 0.20, 0.05, 0.0]);
+app.add_blur(v0_0[0], v0_0[1], 120);
+const v0_1 = app.add_ellipse("Orb-Blue", -200, 350, 700, 700, 0, 0, 0, 0);
+app.set_node_radial_gradient(v0_1[0], v0_1[1], 0.5, 0.5, 0.5,
+    [0.0, 0.6, 1.0], [0.05, 0.08, 0.35, 0.5,  0.05, 0.08, 0.35, 0.15,  0.05, 0.08, 0.35, 0.0]);
+app.add_blur(v0_1[0], v0_1[1], 100);
+const v0_2 = app.add_ellipse("Orb-Warm", 500, 300, 400, 400, 0, 0, 0, 0);
+app.set_node_radial_gradient(v0_2[0], v0_2[1], 0.5, 0.5, 0.5,
+    [0.0, 0.6, 1.0], [0.4, 0.15, 0.03, 0.4,  0.4, 0.15, 0.03, 0.12,  0.4, 0.15, 0.03, 0.0]);
+app.add_blur(v0_2[0], v0_2[1], 80);
+// Grid lines (vertical)
+for (let gx = 0; gx <= 1440; gx += 120) {
+    app.add_rectangle("Grid-V", gx, 0, 1, 900, 1.0, 1.0, 1.0, 0.02);
+}
+// Grid lines (horizontal)
+for (let gy = 0; gy <= 840; gy += 120) {
+    app.add_rectangle("Grid-H", 0, gy, 1440, 1, 1.0, 1.0, 1.0, 0.02);
+}
+// Nav bar
+const nav = app.add_frame("Nav", 0, 0, 549, 80, 0, 0, 0, 0);
+app.set_insert_parent(nav[0], nav[1]);
+const navLogo = app.add_frame("Logo", 60, 32, 71, 16, 0, 0, 0, 0);
+app.set_insert_parent(navLogo[0], navLogo[1]);
+app.add_gradient_rectangle("Dot", 0, 4, 8, 8, 0, 0, 1, 0, [0, 1], [1.0,0.6,0.2,1.0, 0.8,0.3,0.1,1.0]);
+const voidLogo = app.add_text("VOID", "VOID", 20, 0, 13, 1.0, 1.0, 1.0, 1.0);
+app.set_node_size(voidLogo[0], voidLogo[1], 51, 16);
+app.set_node_font_weight(voidLogo[0], voidLogo[1], 700);
+app.set_letter_spacing(voidLogo[0], voidLogo[1], 6);
+app.set_insert_parent(nav[0], nav[1]); // back to Nav
+const navLinks = app.add_frame("NavLinks", 131, 34, 309, 13, 0, 0, 0, 0);
+app.set_insert_parent(navLinks[0], navLinks[1]);
+const navItems = [["Archive",0,51], ["Studio",91,44], ["About",175,40], ["Contact",255,54]];
+for (const [label, nx, nw] of navItems) {
+    const nt = app.add_text(label as string, label as string, nx as number, 0, 11, 1.0, 1.0, 1.0, 0.5);
+    app.set_node_size(nt[0], nt[1], nw as number, 13);
+    app.set_letter_spacing(nt[0], nt[1], 2);
+}
+app.set_insert_parent(nav[0], nav[1]); // back to Nav
+const inquire = app.add_text("Inquire", "Inquire", 440, 34, 11, 1.0, 1.0, 1.0, 0.7);
+app.set_node_size(inquire[0], inquire[1], 49, 13);
+app.set_node_font_weight(inquire[0], inquire[1], 500);
+app.set_letter_spacing(inquire[0], inquire[1], 2);
+app.set_insert_parent(f1[0], f1[1]); // back to Frame 1
+// Editorial label
+const ees = app.add_text("EES", "EDITORIAL EXPERIENCE STUDIO", 120, 220, 10, 1.0, 0.627, 0.235, 0.6);
+app.set_node_size(ees[0], ees[1], 520, 12);
+app.set_letter_spacing(ees[0], ees[1], 8);
+// THE
+const theText = app.add_text("THE", "THE", 122, 260, 16, 1.0, 1.0, 1.0, 0.3);
+app.set_node_size(theText[0], theText[1], 64, 19);
+app.set_node_font_weight(theText[0], theText[1], 300);
+app.set_letter_spacing(theText[0], theText[1], 16);
+// SPACE (huge, Black weight — white-to-warm gradient)
+const space = app.add_text("SPACE", "SPACE", 112, 278, 180, 1.0, 1.0, 1.0, 1.0);
+app.set_node_size(space[0], space[1], 578, 170);
+app.set_node_font_weight(space[0], space[1], 900);
+app.set_letter_spacing(space[0], space[1], -8);
+app.set_line_height(space[0], space[1], 170);
+app.set_text_gradient_fill(space[0], space[1], 'linear',
+    [0, 0.5, 1, 0.5],
+    [0.0, 0.7, 1.0], [1.0, 1.0, 1.0, 1.0,  1.0, 0.85, 0.6, 1.0,  0.8, 0.55, 0.25, 0.7]);
+// BETWEEN (Thin weight, very low opacity)
+const between = app.add_text("BETWEEN", "BETWEEN", 112, 438, 180, 1.0, 1.0, 1.0, 0.12);
+app.set_node_size(between[0], between[1], 817, 170);
+app.set_node_font_weight(between[0], between[1], 100);
+app.set_letter_spacing(between[0], between[1], -4);
+app.set_line_height(between[0], between[1], 170);
+// Separator line (gradient)
+app.add_gradient_rectangle("Sep", 120, 640, 120, 1, 0, 0, 1, 0, [0, 1], [1,1,1,0.3, 1,1,1,0]);
+// Subtitle
+const subtitle = app.add_text("Subtitle", "Where design dissolves into\nthe architecture of feeling", 120, 660, 14, 1.0, 1.0, 1.0, 0.4);
+app.set_node_size(subtitle[0], subtitle[1], 300, 48);
+app.set_node_font_weight(subtitle[0], subtitle[1], 300);
+app.set_line_height(subtitle[0], subtitle[1], 24);
+// Ghost circles (stroke only)
+const ghostOuter = app.add_ellipse("Ghost-Outer", 980, 320, 320, 320, 0, 0, 0, 0);
+app.set_node_stroke(ghostOuter[0], ghostOuter[1], 1.0, 1.0, 1.0, 0.15, 1);
+const ghostInner = app.add_ellipse("Ghost-Inner", 1050, 390, 180, 180, 0, 0, 0, 0);
+app.set_node_stroke(ghostInner[0], ghostInner[1], 1.0, 0.78, 0.47, 0.3, 0.5);
+// Crosshair
+app.add_rectangle("Cross-V", 1139, 470, 1, 20, 1.0, 0.627, 0.235, 0.4);
+app.add_rectangle("Cross-H", 1130, 479, 20, 1, 1.0, 0.627, 0.235, 0.4);
+// Footer markers
+const mmxxvi = app.add_text("MMXXVI", "MMXXVI", 1360, 800, 10, 1.0, 1.0, 1.0, 0.15);
+app.set_node_size(mmxxvi[0], mmxxvi[1], 80, 12);
+app.set_node_font_weight(mmxxvi[0], mmxxvi[1], 300);
+app.set_letter_spacing(mmxxvi[0], mmxxvi[1], 8);
+const n001 = app.add_text("N001", "N\u00ba 001", 120, 860, 10, 1.0, 1.0, 1.0, 0.2);
+app.set_node_size(n001[0], n001[1], 52, 12);
+app.set_letter_spacing(n001[0], n001[1], 4);
+// Center divider (gradient)
+app.add_gradient_rectangle("Divider", 720, 840, 1, 40, 0, 0.5, 0, 1, [0, 1], [1,1,1,0.15, 1,1,1,0]);
+app.clear_insert_parent();
+
+// --- Frame 2: 02 — Form & Void · Split ---
+const f2 = app.add_frame("02 — Form & Void · Split", 0, 960, 1440, 900, 0.008, 0.008, 0.024, 1.0);
+app.set_insert_parent(f2[0], f2[1]);
+app.add_rectangle("Left-Half", 0, 0, 720, 900, 0.008, 0.008, 0.024, 1.0);
+app.add_gradient_rectangle("Right-Half", 720, 0, 720, 900, 0, 0, 1, 0, [0, 1], [0.04,0.04,0.06,1, 0.06,0.04,0.03,1]);
+app.add_gradient_rectangle("Divider", 719, 0, 1, 900, 0, 0, 0, 1, [0, 1], [1,1,1,0.08, 1,1,1,0]);
+const orb2a = app.add_ellipse("Orb", -80, 200, 500, 500, 0, 0, 0, 0);
+app.set_node_radial_gradient(orb2a[0], orb2a[1], 0.5, 0.5, 0.5,
+    [0.0, 0.6, 1.0], [0.1, 0.05, 0.35, 0.5,  0.1, 0.05, 0.35, 0.15,  0.1, 0.05, 0.35, 0.0]);
+app.add_blur(orb2a[0], orb2a[1], 120);
+const orb2b = app.add_ellipse("Orb", 750, 100, 500, 500, 0, 0, 0, 0);
+app.set_node_radial_gradient(orb2b[0], orb2b[1], 0.5, 0.5, 0.5,
+    [0.0, 0.6, 1.0], [0.45, 0.2, 0.05, 0.45,  0.45, 0.2, 0.05, 0.12,  0.45, 0.2, 0.05, 0.0]);
+app.add_blur(orb2b[0], orb2b[1], 140);
+const f2num = app.add_text("02", "02", 60, 60, 120, 1.0, 1.0, 1.0, 0.04);
+app.set_node_size(f2num[0], f2num[1], 146, 120);
+app.set_node_font_weight(f2num[0], f2num[1], 100);
+app.set_line_height(f2num[0], f2num[1], 120);
+const phil = app.add_text("PHILOSOPHY", "PHILOSOPHY", 60, 220, 10, 1.0, 0.627, 0.235, 0.5);
+app.set_node_size(phil[0], phil[1], 136, 12);
+app.set_letter_spacing(phil[0], phil[1], 8);
+const form = app.add_text("FORM", "FORM", 56, 260, 96, 1.0, 1.0, 1.0, 0.95);
+app.set_node_size(form[0], form[1], 278, 90);
+app.set_node_font_weight(form[0], form[1], 900);
+app.set_letter_spacing(form[0], form[1], -3);
+app.set_line_height(form[0], form[1], 90);
+const amp = app.add_text("&", "&", 60, 345, 96, 1.0, 0.706, 0.314, 0.3);
+app.set_node_size(amp[0], amp[1], 57, 90);
+app.set_node_font_weight(amp[0], amp[1], 100);
+app.set_line_height(amp[0], amp[1], 90);
+const voidWord = app.add_text("VOID", "VOID", 56, 430, 96, 1.0, 1.0, 1.0, 0.15);
+app.set_node_size(voidWord[0], voidWord[1], 215, 90);
+app.set_node_font_weight(voidWord[0], voidWord[1], 100);
+app.set_letter_spacing(voidWord[0], voidWord[1], -2);
+app.set_line_height(voidWord[0], voidWord[1], 90);
+const bodyF2 = app.add_text("Body", "The tension between presence and absence\ndefines every meaningful composition.\nWe don\u2019t design objects \u2014 we design the\nnegative space that gives them weight.", 60, 560, 13, 1.0, 1.0, 1.0, 0.35);
+app.set_node_size(bodyF2[0], bodyF2[1], 340, 88);
+app.set_node_font_weight(bodyF2[0], bodyF2[1], 300);
+app.set_line_height(bodyF2[0], bodyF2[1], 22);
+// Right side compositions
+const comp1 = app.add_frame("Comp1", 810, 120, 540, 360, 0, 0, 0, 0);
+app.set_insert_parent(comp1[0], comp1[1]);
+app.add_gradient_rectangle("Block1", 20, 40, 200, 280, 0, 0, 1, 0, [0, 1], [0.08,0.06,0.04,1, 0.04,0.04,0.06,1]);
+app.add_gradient_rectangle("Block2", 200, 80, 300, 200, 0, 0, 1, 0, [0, 1], [0.06,0.04,0.03,1, 0.03,0.03,0.05,1]);
+app.add_ellipse("Dot", 210, 120, 120, 120, 0.35, 0.15, 0.05, 0.4);
+app.set_insert_parent(f2[0], f2[1]); // back to Frame 2
+const compLabel1 = app.add_text("CompLabel1", "Composition N\u00ba 7 \u2014 \"Threshold\"", 810, 496, 10, 1.0, 1.0, 1.0, 0.25);
+app.set_node_size(compLabel1[0], compLabel1[1], 212, 12);
+app.set_letter_spacing(compLabel1[0], compLabel1[1], 2);
+const comp2 = app.add_frame("Comp2", 810, 540, 260, 180, 0, 0, 0, 0);
+app.set_insert_parent(comp2[0], comp2[1]);
+app.add_gradient_rectangle("Divider", 0, 89, 260, 2, 0, 0, 1, 0, [0, 1], [1,1,1,0.1, 1,1,1,0]);
+app.set_insert_parent(f2[0], f2[1]);
+const comp3 = app.add_frame("Comp3", 1090, 540, 260, 180, 0, 0, 0, 0);
+app.set_insert_parent(comp3[0], comp3[1]);
+app.add_ellipse("Dot", 80, 40, 100, 100, 0.35, 0.15, 0.05, 0.4);
+app.set_insert_parent(f2[0], f2[1]);
+const compLabel2 = app.add_text("CompLabel2", "N\u00ba 12 \u2014 \"Liminal\"", 810, 736, 10, 1.0, 1.0, 1.0, 0.2);
+app.set_node_size(compLabel2[0], compLabel2[1], 115, 12);
+app.set_letter_spacing(compLabel2[0], compLabel2[1], 2);
+const compLabel3 = app.add_text("CompLabel3", "N\u00ba 19 \u2014 \"Aperture\"", 1090, 736, 10, 1.0, 1.0, 1.0, 0.2);
+app.set_node_size(compLabel3[0], compLabel3[1], 125, 12);
+app.set_letter_spacing(compLabel3[0], compLabel3[1], 2);
+const f2page = app.add_text("Page", "02 / 05", 1320, 860, 10, 1.0, 1.0, 1.0, 0.15);
+app.set_node_size(f2page[0], f2page[1], 58, 12);
+app.set_node_font_weight(f2page[0], f2page[1], 300);
+app.set_letter_spacing(f2page[0], f2page[1], 4);
+app.clear_insert_parent();
+
+// --- Frame 3: 03 — Resonance · Typography ---
+const f3 = app.add_frame("03 — Resonance · Typography", 0, 1920, 1440, 900, 0.024, 0.016, 0.008, 1.0);
+app.set_insert_parent(f3[0], f3[1]);
+app.add_gradient_rectangle("BG-Gradient", 0, 0, 1440, 900, 0, 0, 0, 1, [0, 1], [0.04,0.03,0.02,1, 0.02,0.02,0.04,1]);
+const orb3a = app.add_ellipse("Orb", 400, -100, 800, 800, 0, 0, 0, 0);
+app.set_node_radial_gradient(orb3a[0], orb3a[1], 0.5, 0.5, 0.5,
+    [0.0, 0.6, 1.0], [0.4, 0.18, 0.06, 0.4,  0.4, 0.18, 0.06, 0.1,  0.4, 0.18, 0.06, 0.0]);
+app.add_blur(orb3a[0], orb3a[1], 200);
+const orb3b = app.add_ellipse("Orb", 800, 400, 500, 500, 0, 0, 0, 0);
+app.set_node_radial_gradient(orb3b[0], orb3b[1], 0.5, 0.5, 0.5,
+    [0.0, 0.6, 1.0], [0.15, 0.08, 0.3, 0.3,  0.15, 0.08, 0.3, 0.08,  0.15, 0.08, 0.3, 0.0]);
+app.add_blur(orb3b[0], orb3b[1], 160);
+// Giant background letters R E S
+const bgR = app.add_text("R", "R", -40, 100, 600, 1.0, 1.0, 1.0, 0.02);
+app.set_node_size(bgR[0], bgR[1], 401, 600);
+app.set_node_font_weight(bgR[0], bgR[1], 900);
+app.set_line_height(bgR[0], bgR[1], 600);
+const bgE = app.add_text("E", "E", 380, 100, 600, 1.0, 1.0, 1.0, 0.02);
+app.set_node_size(bgE[0], bgE[1], 374, 600);
+app.set_node_font_weight(bgE[0], bgE[1], 900);
+app.set_line_height(bgE[0], bgE[1], 600);
+const bgS = app.add_text("S", "S", 800, 100, 600, 1.0, 1.0, 1.0, 0.02);
+app.set_node_size(bgS[0], bgS[1], 400, 600);
+app.set_node_font_weight(bgS[0], bgS[1], 900);
+app.set_line_height(bgS[0], bgS[1], 600);
+// Section header
+const f3num = app.add_text("03", "03", 60, 60, 10, 1.0, 0.706, 0.314, 0.4);
+app.set_node_size(f3num[0], f3num[1], 19, 12);
+app.set_letter_spacing(f3num[0], f3num[1], 6);
+app.add_rectangle("Sep", 90, 66, 40, 1, 1.0, 0.706, 0.314, 0.2);
+const f3label = app.add_text("Label", "TYPOGRAPHIC STUDY", 140, 60, 10, 1.0, 0.706, 0.314, 0.3);
+app.set_node_size(f3label[0], f3label[1], 204, 12);
+app.set_letter_spacing(f3label[0], f3label[1], 6);
+// RESO / NANCE title pair — RESO with amber gradient
+const reso = app.add_text("RESO", "RESO", -20, 180, 200, 1.0, 1.0, 1.0, 1.0);
+app.set_node_size(reso[0], reso[1], 533, 200);
+app.set_node_font_weight(reso[0], reso[1], 900);
+app.set_letter_spacing(reso[0], reso[1], -6);
+app.set_line_height(reso[0], reso[1], 200);
+app.set_text_gradient_fill(reso[0], reso[1], 'linear',
+    [0, 0.5, 1, 0.5],
+    [0.0, 0.6, 1.0], [1.0, 0.75, 0.3, 1.0,  1.0, 0.55, 0.15, 1.0,  0.7, 0.35, 0.1, 0.8]);
+const nance = app.add_text("NANCE", "NANCE", 580, 180, 200, 1.0, 1.0, 1.0, 0.08);
+app.set_node_size(nance[0], nance[1], 678, 200);
+app.set_node_font_weight(nance[0], nance[1], 100);
+app.set_letter_spacing(nance[0], nance[1], -4);
+app.set_line_height(nance[0], nance[1], 200);
+// Divider
+app.add_gradient_rectangle("Divider", 0, 400, 1440, 1, 0, 0, 1, 0, [0, 1], [1,1,1,0.08, 1,1,1,0]);
+// Quote
+const quoteOpen = app.add_text("QuoteO", "\u201C", 100, 430, 80, 1.0, 0.706, 0.314, 0.2);
+app.set_node_size(quoteOpen[0], quoteOpen[1], 28, 80);
+app.set_node_font_weight(quoteOpen[0], quoteOpen[1], 100);
+app.set_line_height(quoteOpen[0], quoteOpen[1], 80);
+const quoteText = app.add_text("Quote", "Typography is not about choosing fonts.\nIt is about orchestrating silence\nbetween words.", 140, 470, 28, 1.0, 1.0, 1.0, 0.6);
+app.set_node_size(quoteText[0], quoteText[1], 600, 132);
+app.set_node_font_weight(quoteText[0], quoteText[1], 300);
+app.set_line_height(quoteText[0], quoteText[1], 44);
+const quoteClose = app.add_text("QuoteC", "\u201D", 740, 540, 80, 1.0, 0.706, 0.314, 0.2);
+app.set_node_size(quoteClose[0], quoteClose[1], 28, 80);
+app.set_node_font_weight(quoteClose[0], quoteClose[1], 100);
+app.set_line_height(quoteClose[0], quoteClose[1], 80);
+const quoteAttr = app.add_text("Attr", "\u2014 Josef M\u00fcller-Brockmann, reinterpreted", 140, 610, 11, 1.0, 1.0, 1.0, 0.2);
+app.set_node_size(quoteAttr[0], quoteAttr[1], 289, 13);
+app.set_node_font_weight(quoteAttr[0], quoteAttr[1], 300);
+app.set_letter_spacing(quoteAttr[0], quoteAttr[1], 2);
+// Weight specimens (100-900)
+const weights = [[100,0.15,"Thin"],[300,0.29,"Light"],[400,0.43,"Regular"],[500,0.57,"Medium"],[700,0.71,"Bold"],[900,0.85,"Black"]];
+let wy = 200;
+for (const [w, op, _label] of weights) {
+    const wf = app.add_frame("W" + w, 980, wy, 78, 34, 0, 0, 0, 0);
+    app.set_insert_parent(wf[0], wf[1]);
+    const wl = app.add_text("WL", String(w), 0, 11, 10, 1.0, 0.706, 0.314, 0.25);
+    app.set_node_size(wl[0], wl[1], 23, 12);
+    app.set_letter_spacing(wl[0], wl[1], 2);
+    const ws = app.add_text("WS", "Aa", 39, 0, 28, 1.0, 1.0, 1.0, op as number);
+    app.set_node_size(ws[0], ws[1], 36, 34);
+    app.set_node_font_weight(ws[0], ws[1], w as number);
+    app.set_insert_parent(f3[0], f3[1]); // back to Frame 3
+    wy += 64;
+}
+const interLabel = app.add_text("InterLabel", "INTER TYPEFACE", 950, 700, 10, 1.0, 1.0, 1.0, 0.1);
+app.set_node_size(interLabel[0], interLabel[1], 186, 12);
+app.set_letter_spacing(interLabel[0], interLabel[1], 8);
+// Baseline metrics
+app.add_rectangle("Baseline", 60, 800, 1320, 1, 1.0, 1.0, 1.0, 0.04);
+const metricLabels = [["BASELINE",60],["X-HEIGHT",300],["CAP HEIGHT",540],["ASCENDER",780]];
+for (const [ml, mx] of metricLabels) {
+    const mlt = app.add_text("M", ml as string, mx as number, 815, 9, 1.0, 1.0, 1.0, 0.12);
+    app.set_node_size(mlt[0], mlt[1], 91, 11);
+    app.set_letter_spacing(mlt[0], mlt[1], 4);
+}
+const f3page = app.add_text("Page", "03 / 05", 1320, 860, 10, 1.0, 1.0, 1.0, 0.15);
+app.set_node_size(f3page[0], f3page[1], 58, 12);
+app.set_node_font_weight(f3page[0], f3page[1], 300);
+app.set_letter_spacing(f3page[0], f3page[1], 4);
+app.clear_insert_parent();
+
+// --- Frame 4: 04 — Disciplines · Services ---
+const f4 = app.add_frame("04 — Disciplines · Services", 0, 2880, 1440, 900, 0.008, 0.008, 0.024, 1.0);
+app.set_insert_parent(f4[0], f4[1]);
+const orb4a = app.add_ellipse("Orb", 100, 100, 600, 600, 0, 0, 0, 0);
+app.set_node_radial_gradient(orb4a[0], orb4a[1], 0.5, 0.5, 0.5,
+    [0.0, 0.6, 1.0], [0.35, 0.14, 0.05, 0.45,  0.35, 0.14, 0.05, 0.12,  0.35, 0.14, 0.05, 0.0]);
+app.add_blur(orb4a[0], orb4a[1], 180);
+const orb4b = app.add_ellipse("Orb", 700, 300, 500, 500, 0, 0, 0, 0);
+app.set_node_radial_gradient(orb4b[0], orb4b[1], 0.5, 0.5, 0.5,
+    [0.0, 0.6, 1.0], [0.08, 0.05, 0.25, 0.35,  0.08, 0.05, 0.25, 0.1,  0.08, 0.05, 0.25, 0.0]);
+app.add_blur(orb4b[0], orb4b[1], 160);
+// Section header
+const f4num = app.add_text("04", "04", 60, 60, 10, 1.0, 0.706, 0.314, 0.4);
+app.set_node_size(f4num[0], f4num[1], 19, 12);
+app.set_letter_spacing(f4num[0], f4num[1], 6);
+app.add_rectangle("Sep", 90, 66, 40, 1, 1.0, 0.706, 0.314, 0.2);
+const f4label = app.add_text("Label", "DISCIPLINES", 140, 60, 10, 1.0, 0.706, 0.314, 0.3);
+app.set_node_size(f4label[0], f4label[1], 121, 12);
+app.set_letter_spacing(f4label[0], f4label[1], 6);
+// Title
+const whatWeDo = app.add_text("Title", "WHAT WE\nDO", 60, 120, 72, 1.0, 1.0, 1.0, 0.9);
+app.set_node_size(whatWeDo[0], whatWeDo[1], 359, 136);
+app.set_node_font_weight(whatWeDo[0], whatWeDo[1], 900);
+app.set_letter_spacing(whatWeDo[0], whatWeDo[1], -2);
+app.set_line_height(whatWeDo[0], whatWeDo[1], 68);
+const f4body = app.add_text("Body", "Six practices. One philosophy.\nEvery project begins in the void.", 60, 280, 13, 1.0, 1.0, 1.0, 0.35);
+app.set_node_size(f4body[0], f4body[1], 400, 44);
+app.set_node_font_weight(f4body[0], f4body[1], 300);
+app.set_line_height(f4body[0], f4body[1], 22);
+// 6 service cards (2 rows of 3)
+const voidCards: [string, string, string, number, number][] = [
+    ["01","Brand\nIdentity","Visual systems that breathe.\nLogos, type, color \u2014 the DNA of recognition.", 60, 370],
+    ["02","Digital\nProduct","Interfaces that dissolve between\nuser and intent. Zero friction.", 520, 370],
+    ["03","Editorial\nDesign","Typography as architecture.\nLayout as narrative.", 980, 370],
+    ["04","Motion\nDesign","Movement with meaning.\nTransitions that reveal.", 60, 630],
+    ["05","Spatial\nExperience","Physical spaces designed with\ndigital precision.", 520, 630],
+    ["06","Creative\nDirection","The invisible hand. Strategic vision\nacross every touchpoint.", 980, 630],
+];
+for (const [num, title, desc, cx, cy] of voidCards) {
+    const card = app.add_frame("Card-" + num, cx, cy, 420, 220, 1.0, 1.0, 1.0, 0.03);
+    app.set_insert_parent(card[0], card[1]);
+    const cn = app.add_text("Num", num, 24, 24, 10, 1.0, 0.706, 0.314, 0.35);
+    app.set_node_size(cn[0], cn[1], 17, 12);
+    app.set_letter_spacing(cn[0], cn[1], 4);
+    const ct = app.add_text("Title", title, 24, 56, 28, 1.0, 1.0, 1.0, 0.85);
+    app.set_node_size(ct[0], ct[1], 200, 64);
+    app.set_node_font_weight(ct[0], ct[1], 700);
+    app.set_line_height(ct[0], ct[1], 32);
+    const cd = app.add_text("Desc", desc, 24, 140, 11, 1.0, 1.0, 1.0, 0.3);
+    app.set_node_size(cd[0], cd[1], 280, 36);
+    app.set_node_font_weight(cd[0], cd[1], 300);
+    app.set_line_height(cd[0], cd[1], 18);
+    app.add_gradient_rectangle("Accent", 24, 200, 40, 1, 0, 0, 1, 0, [0, 1], [1.0,0.7,0.3,0.4, 1.0,0.7,0.3,0]);
+    app.set_insert_parent(f4[0], f4[1]); // back to Frame 4
+}
+const f4page = app.add_text("Page", "04 / 05", 1320, 860, 10, 1.0, 1.0, 1.0, 0.15);
+app.set_node_size(f4page[0], f4page[1], 58, 12);
+app.set_node_font_weight(f4page[0], f4page[1], 300);
+app.set_letter_spacing(f4page[0], f4page[1], 4);
+app.clear_insert_parent();
+
+// --- Frame 5: 05 — Colophon · Contact ---
+const f5 = app.add_frame("05 — Colophon · Contact", 0, 3840, 1440, 900, 0.008, 0.008, 0.024, 1.0);
+app.set_insert_parent(f5[0], f5[1]);
+const orb5a = app.add_ellipse("Orb", 320, 50, 800, 800, 0, 0, 0, 0);
+app.set_node_radial_gradient(orb5a[0], orb5a[1], 0.5, 0.5, 0.5,
+    [0.0, 0.6, 1.0], [0.3, 0.12, 0.04, 0.35,  0.3, 0.12, 0.04, 0.1,  0.3, 0.12, 0.04, 0.0]);
+app.add_blur(orb5a[0], orb5a[1], 200);
+const orb5b = app.add_ellipse("Orb", 800, 400, 500, 500, 0, 0, 0, 0);
+app.set_node_radial_gradient(orb5b[0], orb5b[1], 0.5, 0.5, 0.5,
+    [0.0, 0.6, 1.0], [0.1, 0.06, 0.25, 0.3,  0.1, 0.06, 0.25, 0.08,  0.1, 0.06, 0.25, 0.0]);
+app.add_blur(orb5b[0], orb5b[1], 180);
+// Section header
+const f5num = app.add_text("05", "05", 60, 60, 10, 1.0, 0.706, 0.314, 0.4);
+app.set_node_size(f5num[0], f5num[1], 19, 12);
+app.set_letter_spacing(f5num[0], f5num[1], 6);
+app.add_rectangle("Sep", 90, 66, 40, 1, 1.0, 0.706, 0.314, 0.2);
+const f5label = app.add_text("Label", "COLOPHON", 140, 60, 10, 1.0, 0.706, 0.314, 0.3);
+app.set_node_size(f5label[0], f5label[1], 99, 12);
+app.set_letter_spacing(f5label[0], f5label[1], 6);
+// Giant arrow (decorative)
+const arrow = app.add_text("Arrow", "\u2192", 480, 180, 400, 1.0, 1.0, 1.0, 0.01);
+app.set_node_size(arrow[0], arrow[1], 352, 400);
+app.set_node_font_weight(arrow[0], arrow[1], 100);
+app.set_line_height(arrow[0], arrow[1], 400);
+// CTA — white-to-gold gradient
+const cta = app.add_text("CTA", "BEGIN A CONVERSATION", 520, 300, 10, 1.0, 0.706, 0.314, 1.0);
+app.set_node_size(cta[0], cta[1], 311, 12);
+app.set_text_gradient_fill(cta[0], cta[1], 'linear',
+    [0, 0.5, 1, 0.5],
+    [0.0, 1.0], [1.0, 1.0, 1.0, 0.8,  1.0, 0.75, 0.3, 0.6]);
+app.set_letter_spacing(cta[0], cta[1], 10);
+app.set_text_align(cta[0], cta[1], "center");
+const email = app.add_text("Email", "hello@void.studio", 340, 350, 48, 1.0, 1.0, 1.0, 1.0);
+app.set_node_size(email[0], email[1], 381, 58);
+app.set_node_font_weight(email[0], email[1], 300);
+app.set_letter_spacing(email[0], email[1], -1);
+app.add_gradient_rectangle("EmailLine", 620, 420, 200, 1, 0, 0, 1, 0, [0, 1], [1,1,1,0.15, 1,1,1,0]);
+const phone = app.add_text("Phone", "+1 212 000 0000", 600, 445, 12, 1.0, 1.0, 1.0, 0.2);
+app.set_node_size(phone[0], phone[1], 151, 15);
+app.set_node_font_weight(phone[0], phone[1], 300);
+app.set_letter_spacing(phone[0], phone[1], 4);
+app.set_text_align(phone[0], phone[1], "center");
+// Footer separator
+app.add_rectangle("FooterLine", 60, 660, 1320, 1, 1.0, 1.0, 1.0, 0.04);
+// Footer columns
+const footerCols: [string, string, number][] = [
+    ["STUDIO", "VOID Creative Studio\nNew York / Tokyo / Berlin", 60],
+    ["CONNECT", "Instagram\nBehance\nDribbble\nLinkedIn", 360],
+    ["LEGAL", "Privacy Policy\nTerms of Service\nCookie Preferences", 660],
+    ["TYPEFACE", "Inter by Rasmus Andersson\nSet in Thin through Black\n\u00a9 MMXXVI", 960],
+];
+for (const [heading, body, fx] of footerCols) {
+    const fh = app.add_text("FH", heading, fx, 680, 9, 1.0, 0.706, 0.314, 0.3);
+    app.set_node_size(fh[0], fh[1], 100, 11);
+    app.set_letter_spacing(fh[0], fh[1], 6);
+    const fb = app.add_text("FB", body, fx, 704, 11, 1.0, 1.0, 1.0, 0.25);
+    app.set_node_size(fb[0], fb[1], 200, 72);
+    app.set_node_font_weight(fb[0], fb[1], 300);
+    app.set_line_height(fb[0], fb[1], 18);
+}
+// Copyright
+const copyright = app.add_text("Copyright", "\u00a9 2026 VOID Creative Studio. All rights reserved. Nothing is permanent.", 60, 860, 10, 1.0, 1.0, 1.0, 0.1);
+app.set_node_size(copyright[0], copyright[1], 481, 12);
+app.set_letter_spacing(copyright[0], copyright[1], 2);
+const f5page = app.add_text("Page", "05 / 05", 1320, 860, 10, 1.0, 1.0, 1.0, 0.15);
+app.set_node_size(f5page[0], f5page[1], 58, 12);
+app.set_node_font_weight(f5page[0], f5page[1], 300);
+app.set_letter_spacing(f5page[0], f5page[1], 4);
+// Crosshair accent
+app.add_rectangle("Cross-V", 720, 830, 1, 12, 1.0, 0.706, 0.314, 0.2);
+app.add_rectangle("Cross-H", 715, 835, 12, 1, 1.0, 0.706, 0.314, 0.2);
+app.clear_insert_parent();
+
 // Default view: stress test page unless skipped
 if (!skipStress) {
     app.switch_page(0); // back to stress test
@@ -773,6 +1243,7 @@ function render(forceLayerUpdate = false): void {
             updateLayersPanel();
             updatePropertiesPanel();
             if (selChanged) showInspectorForSelection();
+            if (layersDirty) scheduleSave();
             layersDirty = false;
             panelUpdateTimer = 0;
         });
@@ -1190,9 +1661,11 @@ canvas.addEventListener('mouseup', (e: MouseEvent) => {
     render();
     if (wasCreating) {
         requestAnimationFrame(() => { updateLayersPanel(); });
+        scheduleSave();
     }
     updatePropertiesPanel();
     if (app.is_vector_editing()) drawVectorEditOverlay();
+    scheduleSave();
 });
 
 // ─── Inline Text Editing ────────────────────────────────────────────
@@ -1364,6 +1837,7 @@ const SHORTCUTS: Shortcut[] = [
     { key: 'f', action: () => { app.start_creating('frame'); setCursor('crosshair'); }, label: 'Frame', category: 'tools', when: notInput },
     { key: 't', action: () => { app.start_creating('text'); setCursor('crosshair'); }, label: 'Text', category: 'tools', when: notInput },
     { key: 's', action: () => { app.start_creating('star'); setCursor('crosshair'); }, label: 'Star', category: 'tools', when: notInput },
+    { key: 's', modifiers: ['meta'], action: () => { saveDocument(); }, label: 'Save', category: 'edit' },
     { key: 'p', action: () => { app.pen_start(); setCursor('crosshair'); }, label: 'Pen', category: 'tools', when: notInput },
     { key: 'v', action: () => { setCursor('default'); }, label: 'Select', category: 'tools', when: notInput },
 
@@ -1450,6 +1924,11 @@ function formatShortcutKey(s: Shortcut): string {
 // ─── Keyboard ────────────────────────────────────────────────────────
 
 window.addEventListener('keydown', (e: KeyboardEvent) => {
+    // Skip shortcuts when typing in input fields (AI chat, properties panel, etc.)
+    const tag = (document.activeElement?.tagName || '').toLowerCase();
+    const isTyping = tag === 'input' || tag === 'textarea' || tag === 'select' || (document.activeElement as HTMLElement)?.isContentEditable;
+    if (isTyping && e.key !== 'Escape') return;
+
     // Special: Escape (multi-behavior)
     if (e.key === 'Escape') {
         // Close dropdowns first
@@ -2465,69 +2944,33 @@ function showInspectorForSelection(): void {
     }
 }
 
-// ─── AI Panel ─────────────────────────────────────────────────────────
+// ─── AI Panel (delegated to ai.ts) ───────────────────────────────────
+const toolDeps = { app, render, hexToRgb };
+initAI(toolDeps);
 
-const aiChatHistory: Array<{ role: 'user' | 'ai'; text: string; action?: string }> = [
-    { role: 'ai', text: 'Hello! I\'m Canvas AI. I can help you modify your design. Try asking me to add elements, change colors, or restructure your layout.' },
-];
+// ─── Expose tools on window + MCP WebSocket bridge ──────────────────
+(window as any)._TOOL_DEFS = TOOL_DEFS;
+(window as any)._executeTool = (name: string, args: any) => executeTool(toolDeps, name, args);
 
-function renderAiMessages(): void {
-    let html = '';
-    for (const msg of aiChatHistory) {
-        if (msg.role === 'ai') {
-            html += `<div class="ai-msg-ai">
-                <div class="ai-msg-avatar">✦</div>
-                <div style="flex:1">
-                    <p class="ai-msg-text">${msg.text}</p>
-                    ${msg.action ? `<div class="ai-msg-action"><span style="color:var(--green)">✓</span> ${msg.action}</div>` : ''}
-                </div>
-            </div>`;
-        } else {
-            html += `<div class="ai-msg-user"><div class="ai-msg-user-bubble">${msg.text}</div></div>`;
+// Connect to MCP server's WebSocket (if running)
+function connectMcpBridge() {
+    let ws: WebSocket;
+    try { ws = new WebSocket('ws://localhost:3100'); } catch { return; }
+    ws.onmessage = (e) => {
+        try {
+            const { id, tool, args } = JSON.parse(e.data);
+            const out = executeTool(toolDeps, tool, args);
+            if (out.needsRender) render(true);
+            ws.send(JSON.stringify({ id, result: out.result }));
+        } catch (err: any) {
+            const { id } = JSON.parse(e.data);
+            ws.send(JSON.stringify({ id, result: { error: err.message } }));
         }
-    }
-    aiMessages.innerHTML = html;
-    aiMessages.scrollTop = aiMessages.scrollHeight;
+    };
+    ws.onclose = () => setTimeout(connectMcpBridge, 3000); // reconnect
+    ws.onerror = () => {}; // suppress console noise
 }
-
-function sendAiMessage(): void {
-    const text = aiInput.value.trim();
-    if (!text) return;
-
-    aiChatHistory.push({ role: 'user', text });
-    aiInput.value = '';
-    aiSendBtn.classList.remove('active');
-    renderAiMessages();
-
-    // Simulate AI response (placeholder — will be replaced with real AI integration)
-    setTimeout(() => {
-        aiChatHistory.push({
-            role: 'ai',
-            text: `I understand you want to "${text}". This feature will be connected to a real AI backend. For now, use the design tools to make changes manually.`,
-            action: 'Noted for implementation'
-        });
-        renderAiMessages();
-    }, 800);
-}
-
-renderAiMessages();
-
-aiSendBtn.addEventListener('click', sendAiMessage);
-aiInput.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (e.key === 'Enter') { sendAiMessage(); e.preventDefault(); }
-});
-aiInput.addEventListener('input', () => {
-    aiSendBtn.classList.toggle('active', aiInput.value.trim().length > 0);
-});
-
-// Quick action buttons
-document.querySelectorAll('.ai-quick-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-        aiInput.value = btn.textContent || '';
-        aiSendBtn.classList.add('active');
-        aiInput.focus();
-    });
-});
+connectMcpBridge();
 
 // Toolbar AI button
 toolbarAiBtn.addEventListener('click', (e: Event) => {
@@ -2879,6 +3322,13 @@ function updatePropertiesPanel(): void {
         constraintH: string;
         constraintV: string;
         autoLayout?: { direction: string; spacing: number; padTop: number; padRight: number; padBottom: number; padLeft: number };
+        fills?: Array<{
+            type: string; r?: number; g?: number; b?: number; a?: number;
+            startX?: number; startY?: number; endX?: number; endY?: number;
+            centerX?: number; centerY?: number; radius?: number; startAngle?: number;
+            stops?: Array<{ position: number; r: number; g: number; b: number; a: number }>;
+            path?: string; scaleMode?: string; opacity?: number;
+        }>;
     };
 
     const toHex = (n: string) => parseInt(n).toString(16).padStart(2, '0');
@@ -2997,13 +3447,10 @@ function updatePropertiesPanel(): void {
         <div class="prop-section">
             <div class="prop-section-header">
                 <span class="prop-section-title">Fill</span>
-                <button id="prop-fill-image" class="prop-mini-btn" title="Image fill">Img</button>
+                <button id="prop-fill-add" class="prop-mini-btn" title="Add fill">+</button>
             </div>
-            <div class="prop-row" style="padding-bottom:6px">
-                <div id="prop-fill-swatch" class="prop-color-swatch" style="background:${fillHex}" data-hex="${fillHex}"></div>
-                <input id="prop-fill-hex" class="prop-compact-input prop-hex-input" value="${fillHex}" style="flex:1" />
-                <input type="file" id="prop-fill-image-input" accept="image/*" style="display:none" />
-            </div>
+            <div id="prop-fills-list"></div>
+            <input type="file" id="prop-fill-image-input" accept="image/*" style="display:none" />
         </div>
         <div class="prop-section">
             <div class="prop-section-header"><span class="prop-section-title">Stroke</span></div>
@@ -3081,48 +3528,288 @@ function updatePropertiesPanel(): void {
     commitProp('prop-w', (v) => app.set_node_size(counter, clientId, parseFloat(v), parseFloat((document.getElementById('prop-h') as HTMLInputElement).value)));
     commitProp('prop-h', (v) => app.set_node_size(counter, clientId, parseFloat((document.getElementById('prop-w') as HTMLInputElement).value), parseFloat(v)));
     commitProp('prop-rotation', (v) => app.set_node_rotation(counter, clientId, parseFloat(v)));
-    // Fill color: swatch opens color picker, hex input for direct entry
-    const fillSwatch = document.getElementById('prop-fill-swatch');
-    if (fillSwatch) {
-        // Parse initial color from fill info
-        const initMatch = nodeInfo.fill.match(/rgba?\((\d+),(\d+),(\d+),?([\d.]*)/);
-        const ir = initMatch ? parseInt(initMatch[1]) / 255 : 0.5;
-        const ig = initMatch ? parseInt(initMatch[2]) / 255 : 0.5;
-        const ib = initMatch ? parseInt(initMatch[3]) / 255 : 0.5;
-        const ia = initMatch && initMatch[4] ? parseFloat(initMatch[4]) : 1.0;
-        fillSwatch.addEventListener('click', () => {
-            openColorPicker(fillSwatch, ir, ig, ib, ia, (r, g, b, a) => {
-                app.set_node_fill(counter, clientId, r, g, b, a);
-                fillSwatch.style.background = rgbToHex(r, g, b);
-                const hexIn = document.getElementById('prop-fill-hex') as HTMLInputElement;
-                if (hexIn) hexIn.value = rgbToHex(r, g, b).toUpperCase();
-                render();
+    // ── Fill list: renders all fills with type selector + gradient editor ──
+    const fills: Array<any> = nodeInfo.fills && nodeInfo.fills.length > 0
+        ? JSON.parse(JSON.stringify(nodeInfo.fills))
+        : [{ type: 'solid', r: 136, g: 136, b: 136, a: 1.0 }];
+
+    function commitFills() {
+        app.set_node_fills_json(counter, clientId, JSON.stringify(fills));
+        render();
+    }
+
+    function fillPreviewCSS(f: any): string {
+        if (f.type === 'solid') return rgbToHex(f.r / 255, f.g / 255, f.b / 255);
+        if (f.stops && f.stops.length >= 2) {
+            const ss = f.stops.map((s: any) => `rgba(${s.r},${s.g},${s.b},${s.a}) ${(s.position * 100).toFixed(0)}%`).join(', ');
+            if (f.type === 'linear') return `linear-gradient(90deg, ${ss})`;
+            if (f.type === 'radial') return `radial-gradient(circle, ${ss})`;
+            if (f.type === 'angular') return `conic-gradient(${ss})`;
+        }
+        return '#888';
+    }
+
+    function renderFillsList() {
+        const container = document.getElementById('prop-fills-list');
+        if (!container) return;
+        container.innerHTML = '';
+        fills.forEach((f: any, idx: number) => {
+            const row = document.createElement('div');
+            row.className = 'prop-fill-entry';
+
+            // Preview swatch
+            const swatch = document.createElement('div');
+            swatch.className = 'prop-color-swatch';
+            swatch.style.background = fillPreviewCSS(f);
+            swatch.style.flexShrink = '0';
+
+            // Type selector
+            const sel = document.createElement('select');
+            sel.className = 'prop-fill-type-select';
+            for (const t of ['solid', 'linear', 'radial', 'angular']) {
+                const opt = document.createElement('option');
+                opt.value = t; opt.textContent = t.charAt(0).toUpperCase() + t.slice(1);
+                if (f.type === t) opt.selected = true;
+                sel.appendChild(opt);
+            }
+
+            // Hex display for solid
+            const hexSpan = document.createElement('input');
+            hexSpan.className = 'prop-compact-input prop-hex-input';
+            hexSpan.style.flex = '1';
+            if (f.type === 'solid') {
+                hexSpan.value = rgbToHex(f.r / 255, f.g / 255, f.b / 255).toUpperCase();
+                hexSpan.style.display = '';
+            } else {
+                hexSpan.style.display = 'none';
+            }
+
+            // Delete button
+            const del = document.createElement('button');
+            del.className = 'prop-mini-btn prop-fill-delete';
+            del.textContent = '×';
+            del.title = 'Remove fill';
+            if (fills.length <= 1) del.style.opacity = '0.3';
+
+            row.appendChild(swatch);
+            row.appendChild(sel);
+            row.appendChild(hexSpan);
+            row.appendChild(del);
+            container.appendChild(row);
+
+            // Gradient stop bar (for gradient types)
+            if (f.type !== 'solid' && f.stops) {
+                const bar = createGradientStopBar(f, idx);
+                container.appendChild(bar);
+            }
+
+            // Events
+            swatch.addEventListener('click', () => {
+                if (f.type === 'solid') {
+                    openColorPicker(swatch, f.r / 255, f.g / 255, f.b / 255, f.a ?? 1, (r, g, b, a) => {
+                        f.r = Math.round(r * 255); f.g = Math.round(g * 255); f.b = Math.round(b * 255); f.a = a;
+                        swatch.style.background = rgbToHex(r, g, b);
+                        hexSpan.value = rgbToHex(r, g, b).toUpperCase();
+                        commitFills();
+                    });
+                }
+            });
+
+            sel.addEventListener('change', () => {
+                const newType = sel.value;
+                if (newType === 'solid' && f.type !== 'solid') {
+                    const firstStop = f.stops?.[0];
+                    fills[idx] = { type: 'solid', r: firstStop?.r ?? 128, g: firstStop?.g ?? 128, b: firstStop?.b ?? 128, a: firstStop?.a ?? 1 };
+                } else if (newType !== 'solid' && f.type === 'solid') {
+                    const defaultStops = [
+                        { position: 0, r: f.r ?? 255, g: f.g ?? 255, b: f.b ?? 255, a: f.a ?? 1 },
+                        { position: 1, r: 0, g: 0, b: 0, a: 1 }
+                    ];
+                    if (newType === 'linear') fills[idx] = { type: 'linear', startX: 0, startY: 0.5, endX: 1, endY: 0.5, stops: defaultStops };
+                    else if (newType === 'radial') fills[idx] = { type: 'radial', centerX: 0.5, centerY: 0.5, radius: 0.5, stops: defaultStops };
+                    else if (newType === 'angular') fills[idx] = { type: 'angular', centerX: 0.5, centerY: 0.5, startAngle: 0, stops: defaultStops };
+                } else if (newType !== f.type) {
+                    // Gradient to gradient: keep stops, change type
+                    const stops = f.stops || [];
+                    if (newType === 'linear') fills[idx] = { type: 'linear', startX: 0, startY: 0.5, endX: 1, endY: 0.5, stops };
+                    else if (newType === 'radial') fills[idx] = { type: 'radial', centerX: 0.5, centerY: 0.5, radius: 0.5, stops };
+                    else if (newType === 'angular') fills[idx] = { type: 'angular', centerX: 0.5, centerY: 0.5, startAngle: 0, stops };
+                }
+                commitFills();
+                renderFillsList();
+            });
+
+            hexSpan.addEventListener('change', () => {
+                const hex = hexSpan.value.replace('#', '');
+                if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+                    const [r, g, b] = hexToRgb(hex);
+                    f.r = Math.round(r * 255); f.g = Math.round(g * 255); f.b = Math.round(b * 255);
+                    swatch.style.background = `#${hex}`;
+                    commitFills();
+                }
+            });
+
+            del.addEventListener('click', () => {
+                if (fills.length > 1) { fills.splice(idx, 1); commitFills(); renderFillsList(); }
             });
         });
     }
-    commitProp('prop-fill-hex', (v) => {
-        const hex = v.replace('#', '');
-        if (/^[0-9a-fA-F]{6}$/.test(hex)) {
-            const [r, g, b] = hexToRgb(hex);
-            app.set_node_fill(counter, clientId, r, g, b, 1.0);
-            const swatch = document.getElementById('prop-fill-swatch');
-            if (swatch) swatch.style.background = `#${hex}`;
+
+    function createGradientStopBar(f: any, fillIdx: number): HTMLElement {
+        const wrap = document.createElement('div');
+        wrap.className = 'gradient-stop-wrap';
+        const bar = document.createElement('div');
+        bar.className = 'gradient-stop-bar';
+        bar.style.background = fillPreviewCSS(f);
+        wrap.appendChild(bar);
+
+        let selectedStopIdx = 0;
+        const stops: Array<any> = f.stops || [];
+
+        function renderHandles() {
+            bar.querySelectorAll('.gradient-stop-handle').forEach(h => h.remove());
+            stops.forEach((s: any, si: number) => {
+                const handle = document.createElement('div');
+                handle.className = 'gradient-stop-handle' + (si === selectedStopIdx ? ' selected' : '');
+                handle.style.left = `${s.position * 100}%`;
+                handle.style.background = `rgb(${s.r},${s.g},${s.b})`;
+                bar.appendChild(handle);
+
+                // Drag to move
+                let dragging = false;
+                handle.addEventListener('mousedown', (e: MouseEvent) => {
+                    e.preventDefault(); e.stopPropagation();
+                    if (selectedStopIdx !== si) { selectedStopIdx = si; renderHandles(); renderStopColor(); }
+                    dragging = true;
+                    const barRect = bar.getBoundingClientRect();
+                    const onMove = (me: MouseEvent) => {
+                        const pos = Math.max(0, Math.min(1, (me.clientX - barRect.left) / barRect.width));
+                        s.position = pos;
+                        handle.style.left = `${pos * 100}%`;
+                        bar.style.background = fillPreviewCSS(f);
+                    };
+                    const onUp = () => { dragging = false; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); commitFills(); };
+                    document.addEventListener('mousemove', onMove);
+                    document.addEventListener('mouseup', onUp);
+                });
+
+                // Double-click to remove (if >2 stops)
+                handle.addEventListener('dblclick', (e: MouseEvent) => {
+                    e.preventDefault(); e.stopPropagation();
+                    if (stops.length > 2) {
+                        stops.splice(si, 1);
+                        if (selectedStopIdx >= stops.length) selectedStopIdx = stops.length - 1;
+                        f.stops = stops;
+                        commitFills(); renderHandles(); renderStopColor();
+                        bar.style.background = fillPreviewCSS(f);
+                    }
+                });
+            });
         }
-    });
-    // Image fill button
-    const imgFillBtn = document.getElementById('prop-fill-image');
+
+        // Click empty bar to add stop
+        bar.addEventListener('click', (e: MouseEvent) => {
+            if ((e.target as HTMLElement).classList.contains('gradient-stop-handle')) return;
+            const barRect = bar.getBoundingClientRect();
+            const pos = Math.max(0, Math.min(1, (e.clientX - barRect.left) / barRect.width));
+            // Interpolate color from nearest stops
+            const left = stops.filter((s: any) => s.position <= pos).sort((a: any, b: any) => b.position - a.position)[0] || stops[0];
+            const right = stops.filter((s: any) => s.position > pos).sort((a: any, b: any) => a.position - b.position)[0] || stops[stops.length - 1];
+            const t = left.position === right.position ? 0.5 : (pos - left.position) / (right.position - left.position);
+            const nr = Math.round(left.r + (right.r - left.r) * t);
+            const ng = Math.round(left.g + (right.g - left.g) * t);
+            const nb = Math.round(left.b + (right.b - left.b) * t);
+            const na = +(left.a + (right.a - left.a) * t).toFixed(2);
+            stops.push({ position: +pos.toFixed(3), r: nr, g: ng, b: nb, a: na });
+            stops.sort((a: any, b: any) => a.position - b.position);
+            selectedStopIdx = stops.findIndex((s: any) => Math.abs(s.position - pos) < 0.01);
+            f.stops = stops;
+            commitFills(); renderHandles(); renderStopColor();
+            bar.style.background = fillPreviewCSS(f);
+        });
+
+        // Selected stop color swatch
+        const stopRow = document.createElement('div');
+        stopRow.className = 'prop-row gradient-stop-color-row';
+        const stopSwatch = document.createElement('div');
+        stopSwatch.className = 'prop-color-swatch gradient-stop-swatch';
+        const stopHex = document.createElement('input');
+        stopHex.className = 'prop-compact-input prop-hex-input';
+        stopHex.style.flex = '1';
+        const stopAlpha = document.createElement('input');
+        stopAlpha.className = 'prop-compact-input';
+        stopAlpha.type = 'number'; stopAlpha.min = '0'; stopAlpha.max = '100'; stopAlpha.step = '1';
+        stopAlpha.style.width = '42px'; stopAlpha.style.flexShrink = '0';
+        const pctLabel = document.createElement('span');
+        pctLabel.style.cssText = 'font-size:9px;color:var(--text-ghost)'; pctLabel.textContent = '%';
+        stopRow.appendChild(stopSwatch);
+        stopRow.appendChild(stopHex);
+        stopRow.appendChild(stopAlpha);
+        stopRow.appendChild(pctLabel);
+        wrap.appendChild(stopRow);
+
+        function renderStopColor() {
+            const s = stops[selectedStopIdx];
+            if (!s) return;
+            const hex = rgbToHex(s.r / 255, s.g / 255, s.b / 255);
+            stopSwatch.style.background = hex;
+            stopHex.value = hex.toUpperCase();
+            stopAlpha.value = String(Math.round((s.a ?? 1) * 100));
+        }
+
+        stopSwatch.addEventListener('click', () => {
+            const s = stops[selectedStopIdx];
+            if (!s) return;
+            openColorPicker(stopSwatch, s.r / 255, s.g / 255, s.b / 255, s.a ?? 1, (r, g, b, a) => {
+                s.r = Math.round(r * 255); s.g = Math.round(g * 255); s.b = Math.round(b * 255); s.a = a;
+                renderStopColor(); renderHandles();
+                bar.style.background = fillPreviewCSS(f);
+                commitFills();
+            });
+        });
+
+        stopHex.addEventListener('change', () => {
+            const hex = stopHex.value.replace('#', '');
+            if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+                const [r, g, b] = hexToRgb(hex);
+                const s = stops[selectedStopIdx];
+                s.r = Math.round(r * 255); s.g = Math.round(g * 255); s.b = Math.round(b * 255);
+                renderStopColor(); renderHandles();
+                bar.style.background = fillPreviewCSS(f);
+                commitFills();
+            }
+        });
+
+        stopAlpha.addEventListener('change', () => {
+            const s = stops[selectedStopIdx];
+            if (s) { s.a = Math.max(0, Math.min(1, parseInt(stopAlpha.value) / 100)); commitFills(); }
+        });
+
+        renderHandles();
+        renderStopColor();
+        return wrap;
+    }
+
+    // "+" add fill button
+    const addFillBtn = document.getElementById('prop-fill-add');
+    if (addFillBtn) {
+        addFillBtn.addEventListener('click', () => {
+            fills.push({ type: 'solid', r: 255, g: 255, b: 255, a: 1 });
+            commitFills();
+            renderFillsList();
+        });
+    }
+
+    // Image fill via file input
     const imgFillInput = document.getElementById('prop-fill-image-input') as HTMLInputElement;
-    if (imgFillBtn && imgFillInput) {
-        imgFillBtn.addEventListener('click', () => imgFillInput.click());
+    if (imgFillInput) {
         imgFillInput.addEventListener('change', () => {
             const file = imgFillInput.files?.[0];
             if (!file) return;
             const reader = new FileReader();
             reader.onload = () => {
                 const dataUrl = reader.result as string;
-                // Use a unique key for this image
                 const key = `user-image-${Date.now()}-${file.name}`;
-                // Pre-cache the image in our image cache
                 const img = new Image();
                 img.onload = () => {
                     imageCache.set(key, img);
@@ -3136,6 +3823,8 @@ function updatePropertiesPanel(): void {
             imgFillInput.value = '';
         });
     }
+
+    renderFillsList();
 
     commitProp('prop-stroke', (v) => {
         const r = parseInt(v.slice(1, 3), 16) / 255;
@@ -3306,6 +3995,19 @@ function flushOps(): void {
 }
 
 connectSync();
+
+// ─── Load saved document ─────────────────────────────────────────────
+
+const urlParams = new URLSearchParams(window.location.search);
+if (!urlParams.has('nosave')) {
+    loadDocument().then((loaded) => {
+        if (loaded) {
+            updatePageList();
+            render(true);
+            console.log('Document restored from IndexedDB');
+        }
+    });
+}
 
 // ─── Initial render ──────────────────────────────────────────────────
 

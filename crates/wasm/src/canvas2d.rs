@@ -832,7 +832,13 @@ fn draw_text(
         let font = format!("{}{} {:.0}px '{}', 'SF Pro Display', 'SF Pro Text', system-ui, -apple-system, 'Helvetica Neue', sans-serif",
             style, run.font_weight, run.font_size, run.font_family);
         ctx.set_font(&font);
-        ctx.set_fill_style_str(&color_to_css(&run.color));
+        // Use gradient fill if present, otherwise solid color
+        if let Some(ref paint) = run.fill_override {
+            let text_shape = RenderShape::Rect { width: width as f32, height: height as f32, corner_radii: CornerRadii::default() };
+            set_fill_style(ctx, paint, &text_shape);
+        } else {
+            ctx.set_fill_style_str(&color_to_css(&run.color));
+        }
 
         // Letter spacing via Canvas 2D letterSpacing property
         if run.letter_spacing.abs() > 0.01 {

@@ -5,9 +5,9 @@ members = [
     "crates/renderer",
     "crates/crdt",
     "crates/wasm",
-    "crates/server",
     "crates/fig_import",
 ]
+exclude = ["crates/server"]
 
 [workspace.package]
 version = "0.1.0"

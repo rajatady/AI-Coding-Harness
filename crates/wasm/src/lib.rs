@@ -3842,6 +3842,30 @@ impl FigmaApp {
         )
     }
 
+    /// Export the entire document as JSON for persistence.
+    pub fn export_document_json(&self) -> String {
+        let snap = self.document.to_snapshot();
+        serde_json::to_string(&snap).unwrap_or_else(|e| format!("{{\"error\":\"{}\"}}", e))
+    }
+
+    /// Import a document from JSON snapshot, replacing the current document.
+    /// Returns status JSON: {"ok":true,"pages":N,"nodes":N} or {"ok":false,"error":"..."}
+    pub fn import_document_json(&mut self, json: &str) -> String {
+        let snap: figma_engine::document::DocumentSnapshot = match serde_json::from_str(json) {
+            Ok(s) => s,
+            Err(e) => return format!("{{\"ok\":false,\"error\":\"{}\"}}", e),
+        };
+        let page_count = snap.pages.len();
+        let node_count: usize = snap.pages.iter().map(|p| p.tree.nodes.len()).sum();
+        self.document = figma_engine::document::Document::from_snapshot(snap);
+        self.current_page = 0;
+        self.selected.clear();
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        self.mark_dirty();
+        format!("{{\"ok\":true,\"pages\":{},\"nodes\":{}}}", page_count, node_count)
+    }
+
     /// Get image fills visible in the current viewport as JSON.
     /// Returns: [[path, screenX, screenY, screenW, screenH, opacity], ...]
     /// JS uses this to overlay HTMLImageElements after WASM renders the scene.
@@ -3958,6 +3982,10 @@ impl FigmaApp {
 
     pub fn node_count(&self) -> usize {
         self.document.page(self.current_page).map(|p| p.tree.len()).unwrap_or(0)
+    }
+
+    pub fn total_node_count(&self) -> usize {
+        self.document.pages.iter().map(|p| p.tree.len()).sum()
     }
 
     /// Number of items drawn in last render frame (for diagnostics).
@@ -4236,6 +4264,24 @@ impl FigmaApp {
             }).unwrap_or_default()
         };
 
+        // Serialize full fills array for gradient UI
+        let fills_json = {
+            let fills_src = if let NodeKind::Text { runs, .. } = &node.kind {
+                // For text: synthesize fill from first run
+                if let Some(run) = runs.first() {
+                    if let Some(ref paint) = run.fill_override {
+                        vec![paint.clone()]
+                    } else {
+                        vec![Paint::Solid(run.color)]
+                    }
+                } else { vec![] }
+            } else {
+                node.style.fills.clone()
+            };
+            let entries: Vec<String> = fills_src.iter().map(|p| Self::paint_to_json(p)).collect();
+            format!("[{}]", entries.join(","))
+        };
+
         let node_type = match &node.kind {
             NodeKind::Frame { .. } => "frame",
             NodeKind::Rectangle { .. } => "rectangle",
@@ -4368,9 +4414,47 @@ impl FigmaApp {
         };
 
         format!(
-            r#"{{"name":"{}","x":{:.1},"y":{:.1},"width":{:.1},"height":{:.1},"fill":"{}","type":"{}","text":"{}","fontSize":{:.1},"opacity":{:.2},"blendMode":"{}","stroke":"{}","strokeWeight":{:.1},"constraintH":"{}","constraintV":"{}"{}{}{}{}{}{}}}"#,
-            escaped_name, node.transform.tx, node.transform.ty, node.width, node.height, fill_color, node_type, escaped_text, font_size, node.style.opacity, blend_str, stroke_color, stroke_weight, ch_str, cv_str, auto_layout_json, mask_json, component_json, rotation_json, stroke_align_json, typography_json
+            r#"{{"name":"{}","x":{:.1},"y":{:.1},"width":{:.1},"height":{:.1},"fill":"{}","fills":{},"type":"{}","text":"{}","fontSize":{:.1},"opacity":{:.2},"blendMode":"{}","stroke":"{}","strokeWeight":{:.1},"constraintH":"{}","constraintV":"{}"{}{}{}{}{}{}}}"#,
+            escaped_name, node.transform.tx, node.transform.ty, node.width, node.height, fill_color, fills_json, node_type, escaped_text, font_size, node.style.opacity, blend_str, stroke_color, stroke_weight, ch_str, cv_str, auto_layout_json, mask_json, component_json, rotation_json, stroke_align_json, typography_json
         )
+    }
+
+    /// Get children of a specific node as JSON: [{"name":"...","type":"frame","id":[counter,client_id]}]
+    /// Returns empty array if node has no children or doesn't exist.
+    pub fn get_node_children(&self, counter: u32, client_id: u32) -> String {
+        let node_id = NodeId(figma_engine::id::LogicalClock { counter: counter as u64, client_id });
+        let page = match self.document.page(self.current_page) {
+            Some(p) => p,
+            None => return "[]".to_string(),
+        };
+        let children = match page.tree.children_of(&node_id) {
+            Some(c) => c,
+            None => return "[]".to_string(),
+        };
+        let mut entries = Vec::new();
+        for child_id in children.iter() {
+            if let Some(node) = page.tree.get(child_id) {
+                let escaped = node.name.replace('\\', "\\\\").replace('"', "\\\"");
+                let kind = match &node.kind {
+                    NodeKind::Frame { .. } => "frame",
+                    NodeKind::Rectangle { .. } => "rectangle",
+                    NodeKind::Ellipse { .. } => "ellipse",
+                    NodeKind::Line => "line",
+                    NodeKind::Polygon { .. } => "polygon",
+                    NodeKind::Vector { .. } => "vector",
+                    NodeKind::Text { .. } => "text",
+                    NodeKind::BooleanOp { .. } => "boolean",
+                    NodeKind::Component => "component",
+                    NodeKind::Instance { .. } => "instance",
+                    NodeKind::Image { .. } => "image",
+                };
+                entries.push(format!(
+                    r#"{{"name":"{}","type":"{}","id":[{},{}]}}"#,
+                    escaped, kind, child_id.0.counter, child_id.0.client_id
+                ));
+            }
+        }
+        format!("[{}]", entries.join(","))
     }
 
     /// Total number of layers (children of root).
@@ -4820,6 +4904,319 @@ impl FigmaApp {
         true
     }
 
+    /// Set all fills on a node from a JSON array. Handles solid, gradient, and image fills.
+    /// JSON format: [{"type":"solid","r":255,"g":0,"b":0,"a":1.0}, {"type":"linear","startX":0,...,"stops":[...]}, ...]
+    pub fn set_node_fills_json(&mut self, counter: u32, client_id: u32, fills_json: &str) -> bool {
+        let node_id = NodeId(figma_engine::id::LogicalClock { counter: counter as u64, client_id });
+        let page = match self.document.page_mut(self.current_page) {
+            Some(p) => p, None => return false,
+        };
+        let node = match page.tree.get_mut(&node_id) {
+            Some(n) => n, None => return false,
+        };
+        // Parse JSON
+        let arr: Vec<serde_json::Value> = match serde_json::from_str(fills_json) {
+            Ok(v) => v, Err(_) => return false,
+        };
+        let mut new_fills = Vec::new();
+        for entry in &arr {
+            let t = entry["type"].as_str().unwrap_or("");
+            match t {
+                "solid" => {
+                    let r = entry["r"].as_f64().unwrap_or(0.0) as f32 / 255.0;
+                    let g = entry["g"].as_f64().unwrap_or(0.0) as f32 / 255.0;
+                    let b = entry["b"].as_f64().unwrap_or(0.0) as f32 / 255.0;
+                    let a = entry["a"].as_f64().unwrap_or(1.0) as f32;
+                    new_fills.push(Paint::Solid(Color::new(r, g, b, a)));
+                }
+                "linear" => {
+                    let stops = Self::parse_json_stops(&entry["stops"]);
+                    new_fills.push(Paint::LinearGradient {
+                        stops,
+                        start: Vec2::new(entry["startX"].as_f64().unwrap_or(0.0) as f32, entry["startY"].as_f64().unwrap_or(0.0) as f32),
+                        end: Vec2::new(entry["endX"].as_f64().unwrap_or(1.0) as f32, entry["endY"].as_f64().unwrap_or(1.0) as f32),
+                    });
+                }
+                "radial" => {
+                    let stops = Self::parse_json_stops(&entry["stops"]);
+                    new_fills.push(Paint::RadialGradient {
+                        stops,
+                        center: Vec2::new(entry["centerX"].as_f64().unwrap_or(0.5) as f32, entry["centerY"].as_f64().unwrap_or(0.5) as f32),
+                        radius: entry["radius"].as_f64().unwrap_or(0.5) as f32,
+                    });
+                }
+                "angular" => {
+                    let stops = Self::parse_json_stops(&entry["stops"]);
+                    new_fills.push(Paint::AngularGradient {
+                        stops,
+                        center: Vec2::new(entry["centerX"].as_f64().unwrap_or(0.5) as f32, entry["centerY"].as_f64().unwrap_or(0.5) as f32),
+                        start_angle: entry["startAngle"].as_f64().unwrap_or(0.0) as f32,
+                    });
+                }
+                "diamond" => {
+                    let stops = Self::parse_json_stops(&entry["stops"]);
+                    new_fills.push(Paint::DiamondGradient {
+                        stops,
+                        center: Vec2::new(entry["centerX"].as_f64().unwrap_or(0.5) as f32, entry["centerY"].as_f64().unwrap_or(0.5) as f32),
+                        radius: entry["radius"].as_f64().unwrap_or(0.5) as f32,
+                    });
+                }
+                "image" => {
+                    let path = entry["path"].as_str().unwrap_or("").to_string();
+                    let mode = match entry["scaleMode"].as_str().unwrap_or("fill") {
+                        "fit" => ImageScaleMode::Fit, "tile" => ImageScaleMode::Tile,
+                        "stretch" => ImageScaleMode::Stretch, _ => ImageScaleMode::Fill,
+                    };
+                    let opacity = entry["opacity"].as_f64().unwrap_or(1.0) as f32;
+                    new_fills.push(Paint::Image { path, scale_mode: mode, opacity });
+                }
+                _ => {}
+            }
+        }
+
+        // For text nodes, update run fills
+        if let NodeKind::Text { ref mut runs, .. } = node.kind {
+            let old_runs = runs.clone();
+            self.undo_stack.push(UndoAction::ChangeText {
+                node_id, runs: old_runs, width: node.width, height: node.height,
+            });
+            self.redo_stack.clear();
+            for run in runs.iter_mut() {
+                if let Some(fill) = new_fills.first() {
+                    match fill {
+                        Paint::Solid(c) => { run.color = *c; run.fill_override = None; }
+                        other => { run.fill_override = Some(other.clone()); }
+                    }
+                }
+            }
+            self.patch_scene_text(node_id);
+            self.needs_render = true;
+        } else {
+            let old_fills = node.style.fills.clone();
+            self.undo_stack.push(UndoAction::ChangeFill { node_id, fills: old_fills });
+            self.redo_stack.clear();
+            node.style.fills = new_fills;
+            self.mark_style_dirty(node_id);
+        }
+        true
+    }
+
+    /// Parse gradient stops from JSON array: [{"position":0,"r":255,"g":0,"b":0,"a":1}, ...]
+    fn parse_json_stops(val: &serde_json::Value) -> Vec<GradientStop> {
+        let mut stops = Vec::new();
+        if let Some(arr) = val.as_array() {
+            for s in arr {
+                let pos = s["position"].as_f64().unwrap_or(0.0) as f32;
+                let r = s["r"].as_f64().unwrap_or(0.0) as f32 / 255.0;
+                let g = s["g"].as_f64().unwrap_or(0.0) as f32 / 255.0;
+                let b = s["b"].as_f64().unwrap_or(0.0) as f32 / 255.0;
+                let a = s["a"].as_f64().unwrap_or(1.0) as f32;
+                stops.push(GradientStop::new(pos, Color::new(r, g, b, a)));
+            }
+        }
+        stops
+    }
+
+    /// Helper: parse stop_positions + stop_colors flat arrays into Vec<GradientStop>.
+    fn parse_gradient_stops(stop_positions: &[f32], stop_colors: &[f32]) -> Vec<GradientStop> {
+        let mut stops = Vec::new();
+        for i in 0..stop_positions.len() {
+            let ci = i * 4;
+            if ci + 3 < stop_colors.len() {
+                stops.push(GradientStop::new(
+                    stop_positions[i],
+                    Color::new(stop_colors[ci], stop_colors[ci+1], stop_colors[ci+2], stop_colors[ci+3]),
+                ));
+            }
+        }
+        stops
+    }
+
+    /// Serialize a Paint to JSON string for get_node_info fills array.
+    fn paint_to_json(paint: &Paint) -> String {
+        fn stops_json(stops: &[GradientStop]) -> String {
+            let ss: Vec<String> = stops.iter().map(|s| {
+                format!(r#"{{"position":{:.3},"r":{},"g":{},"b":{},"a":{:.2}}}"#,
+                    s.position, (s.color.r()*255.0) as u8, (s.color.g()*255.0) as u8, (s.color.b()*255.0) as u8, s.color.a())
+            }).collect();
+            format!("[{}]", ss.join(","))
+        }
+        match paint {
+            Paint::Solid(c) => format!(
+                r#"{{"type":"solid","r":{},"g":{},"b":{},"a":{:.2}}}"#,
+                (c.r()*255.0) as u8, (c.g()*255.0) as u8, (c.b()*255.0) as u8, c.a()),
+            Paint::LinearGradient { stops, start, end } => format!(
+                r#"{{"type":"linear","startX":{:.3},"startY":{:.3},"endX":{:.3},"endY":{:.3},"stops":{}}}"#,
+                start.x, start.y, end.x, end.y, stops_json(stops)),
+            Paint::RadialGradient { stops, center, radius } => format!(
+                r#"{{"type":"radial","centerX":{:.3},"centerY":{:.3},"radius":{:.3},"stops":{}}}"#,
+                center.x, center.y, radius, stops_json(stops)),
+            Paint::AngularGradient { stops, center, start_angle } => format!(
+                r#"{{"type":"angular","centerX":{:.3},"centerY":{:.3},"startAngle":{:.3},"stops":{}}}"#,
+                center.x, center.y, start_angle, stops_json(stops)),
+            Paint::DiamondGradient { stops, center, radius } => format!(
+                r#"{{"type":"diamond","centerX":{:.3},"centerY":{:.3},"radius":{:.3},"stops":{}}}"#,
+                center.x, center.y, radius, stops_json(stops)),
+            Paint::Image { path, scale_mode, opacity } => {
+                let mode = match scale_mode {
+                    ImageScaleMode::Fill => "fill", ImageScaleMode::Fit => "fit",
+                    ImageScaleMode::Tile => "tile", ImageScaleMode::Stretch => "stretch",
+                };
+                let escaped = path.replace('\\', "\\\\").replace('"', "\\\"");
+                format!(r#"{{"type":"image","path":"{}","scaleMode":"{}","opacity":{:.2}}}"#, escaped, mode, opacity)
+            }
+        }
+    }
+
+    /// Set linear gradient fill on any node. Replaces existing fills.
+    /// start/end are in 0..1 normalized coordinates (relative to node bounds).
+    pub fn set_node_linear_gradient(
+        &mut self, counter: u32, client_id: u32,
+        start_x: f32, start_y: f32, end_x: f32, end_y: f32,
+        stop_positions: Vec<f32>, stop_colors: Vec<f32>,
+    ) -> bool {
+        let node_id = NodeId(figma_engine::id::LogicalClock { counter: counter as u64, client_id });
+        let page = match self.document.page_mut(self.current_page) {
+            Some(p) => p, None => return false,
+        };
+        let node = match page.tree.get_mut(&node_id) {
+            Some(n) => n, None => return false,
+        };
+        let stops = Self::parse_gradient_stops(&stop_positions, &stop_colors);
+        let old_fills = node.style.fills.clone();
+        self.undo_stack.push(UndoAction::ChangeFill { node_id, fills: old_fills });
+        self.redo_stack.clear();
+        node.style.fills = vec![Paint::LinearGradient {
+            stops,
+            start: Vec2::new(start_x, start_y),
+            end: Vec2::new(end_x, end_y),
+        }];
+        self.mark_style_dirty(node_id);
+        true
+    }
+
+    /// Set radial gradient fill on any node. Replaces existing fills.
+    /// center is in 0..1 normalized coordinates. radius is 0..1 (1.0 = full extent).
+    pub fn set_node_radial_gradient(
+        &mut self, counter: u32, client_id: u32,
+        center_x: f32, center_y: f32, radius: f32,
+        stop_positions: Vec<f32>, stop_colors: Vec<f32>,
+    ) -> bool {
+        let node_id = NodeId(figma_engine::id::LogicalClock { counter: counter as u64, client_id });
+        let page = match self.document.page_mut(self.current_page) {
+            Some(p) => p, None => return false,
+        };
+        let node = match page.tree.get_mut(&node_id) {
+            Some(n) => n, None => return false,
+        };
+        let stops = Self::parse_gradient_stops(&stop_positions, &stop_colors);
+        let old_fills = node.style.fills.clone();
+        self.undo_stack.push(UndoAction::ChangeFill { node_id, fills: old_fills });
+        self.redo_stack.clear();
+        node.style.fills = vec![Paint::RadialGradient {
+            stops,
+            center: Vec2::new(center_x, center_y),
+            radius,
+        }];
+        self.mark_style_dirty(node_id);
+        true
+    }
+
+    /// Set angular (conic) gradient fill on any node. Replaces existing fills.
+    pub fn set_node_angular_gradient(
+        &mut self, counter: u32, client_id: u32,
+        center_x: f32, center_y: f32, start_angle: f32,
+        stop_positions: Vec<f32>, stop_colors: Vec<f32>,
+    ) -> bool {
+        let node_id = NodeId(figma_engine::id::LogicalClock { counter: counter as u64, client_id });
+        let page = match self.document.page_mut(self.current_page) {
+            Some(p) => p, None => return false,
+        };
+        let node = match page.tree.get_mut(&node_id) {
+            Some(n) => n, None => return false,
+        };
+        let stops = Self::parse_gradient_stops(&stop_positions, &stop_colors);
+        let old_fills = node.style.fills.clone();
+        self.undo_stack.push(UndoAction::ChangeFill { node_id, fills: old_fills });
+        self.redo_stack.clear();
+        node.style.fills = vec![Paint::AngularGradient {
+            stops,
+            center: Vec2::new(center_x, center_y),
+            start_angle,
+        }];
+        self.mark_style_dirty(node_id);
+        true
+    }
+
+    /// Append a solid fill to existing fills (for multiple fills per node).
+    pub fn add_node_fill(&mut self, counter: u32, client_id: u32, r: f32, g: f32, b: f32, a: f32) -> bool {
+        let node_id = NodeId(figma_engine::id::LogicalClock { counter: counter as u64, client_id });
+        let page = match self.document.page_mut(self.current_page) {
+            Some(p) => p, None => return false,
+        };
+        let node = match page.tree.get_mut(&node_id) {
+            Some(n) => n, None => return false,
+        };
+        let old_fills = node.style.fills.clone();
+        self.undo_stack.push(UndoAction::ChangeFill { node_id, fills: old_fills });
+        self.redo_stack.clear();
+        node.style.fills.push(Paint::Solid(Color::new(r, g, b, a)));
+        self.mark_style_dirty(node_id);
+        true
+    }
+
+    /// Append a linear gradient fill to existing fills.
+    pub fn add_node_linear_gradient(
+        &mut self, counter: u32, client_id: u32,
+        start_x: f32, start_y: f32, end_x: f32, end_y: f32,
+        stop_positions: Vec<f32>, stop_colors: Vec<f32>,
+    ) -> bool {
+        let node_id = NodeId(figma_engine::id::LogicalClock { counter: counter as u64, client_id });
+        let page = match self.document.page_mut(self.current_page) {
+            Some(p) => p, None => return false,
+        };
+        let node = match page.tree.get_mut(&node_id) {
+            Some(n) => n, None => return false,
+        };
+        let stops = Self::parse_gradient_stops(&stop_positions, &stop_colors);
+        let old_fills = node.style.fills.clone();
+        self.undo_stack.push(UndoAction::ChangeFill { node_id, fills: old_fills });
+        self.redo_stack.clear();
+        node.style.fills.push(Paint::LinearGradient {
+            stops,
+            start: Vec2::new(start_x, start_y),
+            end: Vec2::new(end_x, end_y),
+        });
+        self.mark_style_dirty(node_id);
+        true
+    }
+
+    /// Append a radial gradient fill to existing fills.
+    pub fn add_node_radial_gradient(
+        &mut self, counter: u32, client_id: u32,
+        center_x: f32, center_y: f32, radius: f32,
+        stop_positions: Vec<f32>, stop_colors: Vec<f32>,
+    ) -> bool {
+        let node_id = NodeId(figma_engine::id::LogicalClock { counter: counter as u64, client_id });
+        let page = match self.document.page_mut(self.current_page) {
+            Some(p) => p, None => return false,
+        };
+        let node = match page.tree.get_mut(&node_id) {
+            Some(n) => n, None => return false,
+        };
+        let stops = Self::parse_gradient_stops(&stop_positions, &stop_colors);
+        let old_fills = node.style.fills.clone();
+        self.undo_stack.push(UndoAction::ChangeFill { node_id, fills: old_fills });
+        self.redo_stack.clear();
+        node.style.fills.push(Paint::RadialGradient {
+            stops,
+            center: Vec2::new(center_x, center_y),
+            radius,
+        });
+        self.mark_style_dirty(node_id);
+        true
+    }
+
     /// Set node name.
     pub fn set_node_name(&mut self, counter: u32, client_id: u32, name: &str) -> bool {
         let node_id = NodeId(figma_engine::id::LogicalClock { counter: counter as u64, client_id });
@@ -5083,6 +5480,77 @@ impl FigmaApp {
         };
         if let NodeKind::Text { ref mut vertical_align, .. } = node.kind {
             *vertical_align = va;
+            self.patch_scene_text(node_id);
+            self.needs_render = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Set text horizontal alignment: "left", "center", "right".
+    pub fn set_text_align(&mut self, counter: u32, client_id: u32, align: &str) -> bool {
+        use figma_engine::node::TextAlign;
+        let ha = match align {
+            "center" => TextAlign::Center,
+            "right" => TextAlign::Right,
+            _ => TextAlign::Left,
+        };
+        let node_id = NodeId(figma_engine::id::LogicalClock { counter: counter as u64, client_id });
+        let page = match self.document.page_mut(self.current_page) {
+            Some(p) => p,
+            None => return false,
+        };
+        let node = match page.tree.get_mut(&node_id) {
+            Some(n) => n,
+            None => return false,
+        };
+        if let NodeKind::Text { ref mut align, .. } = node.kind {
+            *align = ha;
+            self.patch_scene_text(node_id);
+            self.needs_render = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Set gradient fill on text (all runs). Type: "linear" or "radial".
+    /// For linear: extra = [start_x, start_y, end_x, end_y]. For radial: extra = [center_x, center_y, radius].
+    pub fn set_text_gradient_fill(
+        &mut self, counter: u32, client_id: u32, gradient_type: &str,
+        extra: Vec<f32>, stop_positions: Vec<f32>, stop_colors: Vec<f32>,
+    ) -> bool {
+        let node_id = NodeId(figma_engine::id::LogicalClock { counter: counter as u64, client_id });
+        let page = match self.document.page_mut(self.current_page) {
+            Some(p) => p, None => return false,
+        };
+        let node = match page.tree.get_mut(&node_id) {
+            Some(n) => n, None => return false,
+        };
+        let stops = Self::parse_gradient_stops(&stop_positions, &stop_colors);
+        let paint = match gradient_type {
+            "linear" if extra.len() >= 4 => Paint::LinearGradient {
+                stops,
+                start: Vec2::new(extra[0], extra[1]),
+                end: Vec2::new(extra[2], extra[3]),
+            },
+            "radial" if extra.len() >= 3 => Paint::RadialGradient {
+                stops,
+                center: Vec2::new(extra[0], extra[1]),
+                radius: extra[2],
+            },
+            "angular" if extra.len() >= 3 => Paint::AngularGradient {
+                stops,
+                center: Vec2::new(extra[0], extra[1]),
+                start_angle: extra[2],
+            },
+            _ => return false,
+        };
+        if let NodeKind::Text { ref mut runs, .. } = node.kind {
+            for run in runs.iter_mut() {
+                run.fill_override = Some(paint.clone());
+            }
             self.patch_scene_text(node_id);
             self.needs_render = true;
             true

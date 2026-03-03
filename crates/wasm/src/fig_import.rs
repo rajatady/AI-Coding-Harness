@@ -641,6 +641,7 @@ fn get_text_data(val: &Value) -> (Vec<TextRun>, TextAlign) {
         letter_spacing,
         line_height,
         decoration,
+        fill_override: None,
     }];
 
     (runs, align)

@@ -130,7 +130,7 @@ async function main() {
 
         // Navigate and wait for stress test to load
         console.log('FPS: Loading app...');
-        await page.goto(`http://localhost:${PORT}`, { waitUntil: 'networkidle2', timeout: TIMEOUT });
+        await page.goto(`http://localhost:${PORT}/?nosave`, { waitUntil: 'networkidle2', timeout: TIMEOUT });
 
         await page.waitForFunction(
             () => window._app && window._render && window._app.node_count() > 100000,
