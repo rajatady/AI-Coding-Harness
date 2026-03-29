@@ -1,0 +1,464 @@
+{
+  "session_file": "/Users/kumardivyarajat/.claude/projects/-Users-kumardivyarajat-WebstormProjects-myide/921a5e9a-452a-4bae-b639-310a79497edf.jsonl",
+  "file_size_mb": 328.2,
+  "total_jsonl_lines": 57090,
+  "parse_errors": 0,
+  "timeline": {
+    "first_timestamp": "2026-02-21T13:16:31.958000+00:00",
+    "last_timestamp": "2026-03-03T05:40:45.792000+00:00",
+    "total_wall_clock_hours": 232.4,
+    "total_wall_clock_formatted": "232h 24m",
+    "compaction_resumes": 68,
+    "avg_minutes_between_compactions": 168.7,
+    "compaction_gap_details_minutes": [
+      85.8,
+      32.2,
+      79.5,
+      133.6,
+      41.7,
+      35.4,
+      637.9,
+      50.9,
+      54.9,
+      31.1,
+      40.7,
+      60.1,
+      53.2,
+      41.3,
+      69.9,
+      39.3,
+      65.6,
+      34.4,
+      47.4,
+      70.8
+    ]
+  },
+  "human_intervention": {
+    "total_real_directives": 340,
+    "categories": {
+      "meta": 75,
+      "build instruction": 134,
+      "correction": 34,
+      "other": 84,
+      "strategic/philosophical": 13
+    },
+    "avg_minutes_between_interventions": 41.1,
+    "sample_directives": [
+      {
+        "category": "meta",
+        "snippet": "this is a slightly meta project to make. Current project is blank and has nothing but here's what we are trying to do. I want to ask you a question. W"
+      },
+      {
+        "category": "build instruction",
+        "snippet": "start planning the architecture, let's build this. Remmeber, I am not going to help you or even review your work. You need to understand a few things "
+      },
+      {
+        "category": "correction",
+        "snippet": "See, this is a problem for you. Why? I will tell you. You just used tools to write memories, but where do you think you wrote those memories? "
+      },
+      {
+        "category": "other",
+        "snippet": "contionue"
+      },
+      {
+        "category": "build instruction",
+        "snippet": "Let me give you the goal I would you to achieve. Be able to build a completely new wasm libaray with figma renderer (must exceed figma's performance w"
+      },
+      {
+        "category": "build instruction",
+        "snippet": "Let me give you the goal I would you to achieve. Be able to build a completely new wasm libaray with figma renderer (must exceed figma's performance w"
+      },
+      {
+        "category": "build instruction",
+        "snippet": "continue, don't stop and don't ask me. You started solution before thinking about all the pains you will suffer wehen building the stress test tool an"
+      },
+      {
+        "category": "build instruction",
+        "snippet": "I am stepping in one last time because your context is context oriented. You have't even thought about the problems you wull face with tooling to achi"
+      },
+      {
+        "category": "other",
+        "snippet": "<command-name>/exit</command-name>\n            <command-message>exit</command-message>\n            <command-args></command-args>"
+      },
+      {
+        "category": "other",
+        "snippet": "<local-command-stdout>Catch you later!</local-command-stdout>"
+      },
+      {
+        "category": "build instruction",
+        "snippet": "continue"
+      },
+      {
+        "category": "meta",
+        "snippet": "What about the massive context you had to spend ti verify it wirks visually?"
+      },
+      {
+        "category": "other",
+        "snippet": "Take a stpe back. You have been struggling off late. Why exactly? You are living the pain and not solving it."
+      },
+      {
+        "category": "build instruction",
+        "snippet": "continue. How do you now juggle ebtween figma ui, controls, frames, complete artboards, and the rust part and the server that actually stores and serv"
+      },
+      {
+        "category": "build instruction",
+        "snippet": "you are also about to get compacted automatically btw. I will tell you this only once. I will not step in. This is the right question to ask before wr"
+      }
+    ]
+  },
+  "agent_work_patterns": {
+    "total_assistant_messages": 17645,
+    "total_tool_uses": 10430,
+    "tool_use_breakdown": {
+      "Bash": 2301,
+      "Read": 2027,
+      "Edit": 1447,
+      "Grep": 1416,
+      "mcp__playwright-extension__browser_evaluate": 884,
+      "mcp__playwright-extension__browser_take_screenshot": 364,
+      "mcp__playwright-extension__browser_click": 236,
+      "mcp__playwright-extension__browser_navigate": 230,
+      "Write": 172,
+      "mcp__canvas__create_node": 119,
+      "mcp__playwright-extension__browser_run_code": 118,
+      "mcp__playwright-extension__browser_snapshot": 113,
+      "mcp__playwright-extension__browser_press_key": 108,
+      "mcp__plugin_playwright_playwright__browser_take_screenshot": 98,
+      "mcp__playwright-extension__browser_close": 78,
+      "mcp__plugin_playwright_playwright__browser_click": 75,
+      "mcp__playwright-extension__browser_wait_for": 73,
+      "mcp__plugin_playwright_playwright__browser_evaluate": 67,
+      "mcp__plugin_playwright_playwright__browser_navigate": 60,
+      "Task": 55,
+      "mcp__canvas__get_node_details": 43,
+      "TaskUpdate": 37,
+      "Glob": 34,
+      "mcp__plugin_playwright_playwright__browser_press_key": 28,
+      "mcp__playwright-extension__browser_type": 28,
+      "TaskCreate": 23,
+      "mcp__playwright-extension__browser_console_messages": 23,
+      "mcp__plugin_playwright_playwright__browser_run_code": 19,
+      "mcp__plugin_playwright_playwright__browser_snapshot": 17,
+      "mcp__plugin_playwright_playwright__browser_close": 13,
+      "EnterPlanMode": 13,
+      "ExitPlanMode": 13,
+      "mcp__playwright-extension__browser_tabs": 13,
+      "WebFetch": 13,
+      "WebSearch": 11,
+      "mcp__playwright-extension__browser_file_upload": 9,
+      "mcp__playwright-extension__browser_fill_form": 9,
+      "mcp__canvas__edit_node": 8,
+      "mcp__canvas__get_page_structure": 6,
+      "mcp__canvas__delete_node": 5,
+      "TaskOutput": 4,
+      "mcp__playwright-extension__browser_select_option": 3,
+      "mcp__playwright-extension__browser_drag": 3,
+      "Skill": 3,
+      "mcp__canvas__render": 3,
+      "mcp__canvas__switch_page": 2,
+      "mcp__plugin_playwright_playwright__browser_install": 1,
+      "mcp__plugin_playwright_playwright__browser_wait_for": 1,
+      "mcp__playwright-extension__browser_network_requests": 1,
+      "mcp__playwright-extension__browser_handle_dialog": 1,
+      "mcp__personal-hub__gmail": 1,
+      "AskUserQuestion": 1
+    },
+    "avg_tool_uses_per_assistant_turn": 0.59,
+    "longest_streak_without_human": 1676
+  },
+  "interrupts": {
+    "total_interrupts": 244,
+    "distribution_by_quartile": {
+      "Q1_early": 153,
+      "Q2": 35,
+      "Q3": 40,
+      "Q4_late": 16
+    }
+  },
+  "session_segments": {
+    "total_segments": 69,
+    "segments": [
+      {
+        "segment_number": 1,
+        "start": "2026-02-21T13:16:31.958000+00:00",
+        "end": "2026-02-21T14:42:18.905000+00:00",
+        "duration_minutes": 85.8,
+        "human_directives": 13,
+        "assistant_messages": 375,
+        "tool_results": 241
+      },
+      {
+        "segment_number": 2,
+        "start": "2026-02-21T14:42:18.905000+00:00",
+        "end": "2026-02-21T15:14:33.853000+00:00",
+        "duration_minutes": 32.2,
+        "human_directives": 2,
+        "assistant_messages": 206,
+        "tool_results": 120
+      },
+      {
+        "segment_number": 3,
+        "start": "2026-02-21T15:14:33.853000+00:00",
+        "end": "2026-02-21T16:34:03.651000+00:00",
+        "duration_minutes": 79.5,
+        "human_directives": 13,
+        "assistant_messages": 362,
+        "tool_results": 218
+      },
+      {
+        "segment_number": 4,
+        "start": "2026-02-21T16:34:03.651000+00:00",
+        "end": "2026-02-21T18:47:36.899000+00:00",
+        "duration_minutes": 133.6,
+        "human_directives": 9,
+        "assistant_messages": 340,
+        "tool_results": 193
+      },
+      {
+        "segment_number": 5,
+        "start": "2026-02-21T18:47:36.899000+00:00",
+        "end": "2026-02-21T19:29:20.997000+00:00",
+        "duration_minutes": 41.7,
+        "human_directives": 4,
+        "assistant_messages": 364,
+        "tool_results": 214
+      },
+      {
+        "segment_number": 6,
+        "start": "2026-02-21T19:29:20.997000+00:00",
+        "end": "2026-02-21T20:04:42.770000+00:00",
+        "duration_minutes": 35.4,
+        "human_directives": 4,
+        "assistant_messages": 308,
+        "tool_results": 188
+      },
+      {
+        "segment_number": 7,
+        "start": "2026-02-21T20:04:42.770000+00:00",
+        "end": "2026-02-22T06:42:35.763000+00:00",
+        "duration_minutes": 637.9,
+        "human_directives": 17,
+        "assistant_messages": 255,
+        "tool_results": 137
+      },
+      {
+        "segment_number": 8,
+        "start": "2026-02-22T06:42:35.763000+00:00",
+        "end": "2026-02-22T07:33:28.367000+00:00",
+        "duration_minutes": 50.9,
+        "human_directives": 7,
+        "assistant_messages": 323,
+        "tool_results": 183
+      },
+      {
+        "segment_number": 9,
+        "start": "2026-02-22T07:33:28.367000+00:00",
+        "end": "2026-02-22T08:28:23.022000+00:00",
+        "duration_minutes": 54.9,
+        "human_directives": 0,
+        "assistant_messages": 308,
+        "tool_results": 194
+      },
+      {
+        "segment_number": 10,
+        "start": "2026-02-22T08:28:23.022000+00:00",
+        "end": "2026-02-22T08:59:31.906000+00:00",
+        "duration_minutes": 31.1,
+        "human_directives": 0,
+        "assistant_messages": 191,
+        "tool_results": 115
+      },
+      {
+        "segment_number": 11,
+        "start": "2026-02-22T08:59:31.906000+00:00",
+        "end": "2026-02-22T09:40:11.607000+00:00",
+        "duration_minutes": 40.7,
+        "human_directives": 0,
+        "assistant_messages": 227,
+        "tool_results": 140
+      },
+      {
+        "segment_number": 12,
+        "start": "2026-02-22T09:40:11.607000+00:00",
+        "end": "2026-02-22T10:40:19.469000+00:00",
+        "duration_minutes": 60.1,
+        "human_directives": 2,
+        "assistant_messages": 338,
+        "tool_results": 203
+      },
+      {
+        "segment_number": 13,
+        "start": "2026-02-22T10:40:19.469000+00:00",
+        "end": "2026-02-22T11:33:28.567000+00:00",
+        "duration_minutes": 53.2,
+        "human_directives": 0,
+        "assistant_messages": 382,
+        "tool_results": 228
+      },
+      {
+        "segment_number": 14,
+        "start": "2026-02-22T11:33:28.567000+00:00",
+        "end": "2026-02-22T12:14:46.879000+00:00",
+        "duration_minutes": 41.3,
+        "human_directives": 0,
+        "assistant_messages": 309,
+        "tool_results": 186
+      },
+      {
+        "segment_number": 15,
+        "start": "2026-02-22T12:14:46.879000+00:00",
+        "end": "2026-02-22T13:24:42.298000+00:00",
+        "duration_minutes": 69.9,
+        "human_directives": 8,
+        "assistant_messages": 301,
+        "tool_results": 185
+      },
+      {
+        "segment_number": 16,
+        "start": "2026-02-22T13:24:42.298000+00:00",
+        "end": "2026-02-22T14:03:58.415000+00:00",
+        "duration_minutes": 39.3,
+        "human_directives": 1,
+        "assistant_messages": 269,
+        "tool_results": 151
+      },
+      {
+        "segment_number": 17,
+        "start": "2026-02-22T14:03:58.415000+00:00",
+        "end": "2026-02-22T15:09:33.858000+00:00",
+        "duration_minutes": 65.6,
+        "human_directives": 20,
+        "assistant_messages": 273,
+        "tool_results": 170
+      },
+      {
+        "segment_number": 18,
+        "start": "2026-02-22T15:09:33.858000+00:00",
+        "end": "2026-02-22T15:43:56.659000+00:00",
+        "duration_minutes": 34.4,
+        "human_directives": 1,
+        "assistant_messages": 291,
+        "tool_results": 171
+      },
+      {
+        "segment_number": 19,
+        "start": "2026-02-22T15:43:56.659000+00:00",
+        "end": "2026-02-22T16:31:23.178000+00:00",
+        "duration_minutes": 47.4,
+        "human_directives": 9,
+        "assistant_messages": 279,
+        "tool_results": 167
+      },
+      {
+        "segment_number": 20,
+        "start": "2026-02-22T16:31:23.178000+00:00",
+        "end": "2026-02-22T17:42:12.497000+00:00",
+        "duration_minutes": 70.8,
+        "human_directives": 0,
+        "assistant_messages": 264,
+        "tool_results": 156
+      },
+      {
+        "segment_number": 21,
+        "start": "2026-02-22T17:42:12.497000+00:00",
+        "end": "2026-02-22T18:14:44.752000+00:00",
+        "duration_minutes": 32.5,
+        "human_directives": 1,
+        "assistant_messages": 227,
+        "tool_results": 136
+      },
+      {
+        "segment_number": 22,
+        "start": "2026-02-22T18:14:44.752000+00:00",
+        "end": "2026-02-22T18:58:32.053000+00:00",
+        "duration_minutes": 43.8,
+        "human_directives": 4,
+        "assistant_messages": 223,
+        "tool_results": 124
+      },
+      {
+        "segment_number": 23,
+        "start": "2026-02-22T18:58:32.053000+00:00",
+        "end": "2026-02-22T19:49:05.668000+00:00",
+        "duration_minutes": 50.6,
+        "human_directives": 13,
+        "assistant_messages": 224,
+        "tool_results": 132
+      },
+      {
+        "segment_number": 24,
+        "start": "2026-02-22T19:49:05.668000+00:00",
+        "end": "2026-02-22T20:29:06.714000+00:00",
+        "duration_minutes": 40.0,
+        "human_directives": 6,
+        "assistant_messages": 205,
+        "tool_results": 129
+      },
+      {
+        "segment_number": 25,
+        "start": "2026-02-22T20:29:06.714000+00:00",
+        "end": "2026-02-22T21:11:32.245000+00:00",
+        "duration_minutes": 42.4,
+        "human_directives": 5,
+        "assistant_messages": 247,
+        "tool_results": 147
+      },
+      {
+        "segment_number": 26,
+        "start": "2026-02-22T21:11:32.245000+00:00",
+        "end": "2026-02-22T21:45:45.475000+00:00",
+        "duration_minutes": 34.2,
+        "human_directives": 5,
+        "assistant_messages": 111,
+        "tool_results": 58
+      },
+      {
+        "segment_number": 27,
+        "start": "2026-02-22T21:45:45.475000+00:00",
+        "end": "2026-02-23T04:36:15.720000+00:00",
+        "duration_minutes": 410.5,
+        "human_directives": 7,
+        "assistant_messages": 254,
+        "tool_results": 149
+      },
+      {
+        "segment_number": 28,
+        "start": "2026-02-23T04:36:15.720000+00:00",
+        "end": "2026-02-23T05:08:55.163000+00:00",
+        "duration_minutes": 32.7,
+        "human_directives": 0,
+        "assistant_messages": 183,
+        "tool_results": 107
+      },
+      {
+        "segment_number": 29,
+        "start": "2026-02-23T05:08:55.163000+00:00",
+        "end": "2026-02-23T05:52:04.487000+00:00",
+        "duration_minutes": 43.2,
+        "human_directives": 0,
+        "assistant_messages": 240,
+        "tool_results": 147
+      },
+      {
+        "segment_number": 30,
+        "start": "2026-02-23T05:52:04.487000+00:00",
+        "end": "2026-02-23T06:37:01.237000+00:00",
+        "duration_minutes": 44.9,
+        "human_directives": 0,
+        "assistant_messages": 228,
+        "tool_results": 138
+      }
+    ]
+  },
+  "code_output_estimation": {
+    "write_operations": 172,
+    "edit_operations": 1447,
+    "total_code_change_operations": 1619,
+    "bash_commands": 2301
+  },
+  "other_stats": {
+    "task_notifications": 39,
+    "system_messages": 559,
+    "tool_result_messages": 10430
+  }
+}

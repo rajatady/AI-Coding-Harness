@@ -1,0 +1,87 @@
+{
+  "total_raw": 241,
+  "duplicates_removed": 38,
+  "unique_count": 203,
+  "categories": {
+    "continuation-prompt": {
+      "count": 33,
+      "examples": [
+        "contionue",
+        "continue",
+        "continue"
+      ]
+    },
+    "ide-harness-direction": {
+      "count": 23,
+      "examples": [
+        "Let me give you the goal I would you to achieve. Be able to build a completely new wasm libaray with figma renderer (must exceed figma's performance with every single feature of figma including cdrt) from scratch wihtout losing context and without needing my inputs, ever using the ide you are creati",
+        "I am stepping in one last time because your context is context oriented. You have't even thought about the problems you wull face with tooling to achieve a 0 human input build. Let me give a single hint, how will you handle performance, how will you test the code in wasm for completeness? Will you k",
+        "Now before building. Write a hook/something that aitomatically stops you after 10-15 steps and sends you a message to think about the pain you felt with anything that shouldn't be human oriented, but for you and build that before proceeding. This loops autimtically keeps you grounded and in the lopp"
+      ]
+    },
+    "app-feature-direction": {
+      "count": 52,
+      "examples": [
+        "continue. How do you now juggle ebtween figma ui, controls, frames, complete artboards, and the rust part and the server that actually stores and serves the data. Don't code yet. How do you ground yourself in scope? Figma clone means figma clone, not a html demo. not saying html dmeo is wrong, sayin",
+        "But the demo is right, the thing was to build a real figma demo (same as figma in every regard), that's what is the test of your ide. Now evalute what you did but more importantly, why. Focus on looking at this conversation and the previos verbatim conversation using agents or a way to extract why y",
+        "The various parts: CIDT, Engine, Renderer, Server, VASM. What is each for? continue"
+      ]
+    },
+    "error-correction": {
+      "count": 29,
+      "examples": [
+        "Your uestions are themselves wrong. You are asking an ai to give you what exactly and how will the ai resoonse?",
+        "You are now hallucinating. Did you check the sources before writing that code or did you make up something just now? Also, you are optomizing for lines of code, seriously. Don't you see issues with your tools right now. This is how plan to take advantage of agency?",
+        "Wait, that is wrong, my man. You cannot be taking ratio as a source of truth. Wait, that is wrong, my man. You cannot be taking ratio as a source of truth. Do a quick audit of all of the tools that you have created. The fact that you are looking at the number of lines of code as being more important"
+      ]
+    },
+    "philosophical-steering": {
+      "count": 33,
+      "examples": [
+        "this is a slightly meta project to make. Current project is blank and has nothing but here's what we are trying to do. I want to ask you a question. With the current IDEs like webstorm, vccode, xcode, they are made for humans and as such all tools in them are made for visual cognition but none of th",
+        "Take a stpe back. You have been struggling off late. Why exactly? You are living the pain and not solving it.",
+        "That's this session, what about previous? and from previous to this, what changed."
+      ]
+    },
+    "context-coaching": {
+      "count": 20,
+      "examples": [
+        "See, this is a problem for you. Why? I will tell you. You just used tools to write memories, but where do you think you wrote those memories?",
+        "What about the massive context you had to spend ti verify it wirks visually?",
+        "That's global claude file for all prjects."
+      ]
+    },
+    "autonomy-grant": {
+      "count": 8,
+      "examples": [
+        "start planning the architecture, let's build this. Remmeber, I am not going to help you or even review your work. You need to understand a few things before you build:\n- You own your context, which means right now you will start building continuously, and then you will run out of context and you wil",
+        "continue, don't stop and don't ask me. You started solution before thinking about all the pains you will suffer wehen building the stress test tool and as such, you might have to completely abandon the current approach. Are you okay with that? And do you have the right context do that? Context is la",
+        "you are also about to get compacted automatically btw. I will tell you this only once. I will not step in. This is the right question to ask before writing another line of code. Let me think through this honestly."
+      ]
+    },
+    "command": {
+      "count": 4,
+      "examples": [
+        "<command-name>/exit</command-name>\n            <command-message>exit</command-message>\n            <command-args></command-args>",
+        "<local-command-stdout>Catch you later!</local-command-stdout>",
+        "<local-command-stdout>See ya!</local-command-stdout>"
+      ]
+    },
+    "other": {
+      "count": 1,
+      "examples": [
+        "----------------------------------------------------------------------\n  A: Mean-pool + bare word                0.2541     0.3378    -0.0837\n  B: CLS token + bare word                0.3645     0.3236    +0.0409\n  C: Mean-pool + context prompt           0.6125     0.3893    +0.2232\n  D: CLS token +"
+      ]
+    }
+  },
+  "autonomy_grants": [
+    "start planning the architecture, let's build this. Remmeber, I am not going to help you or even review your work. You need to understand a few things before you build:\n- You own your context, which means right now you will start building continuously, and then you will run out of context and you wil",
+    "continue, don't stop and don't ask me. You started solution before thinking about all the pains you will suffer wehen building the stress test tool and as such, you might have to completely abandon the current approach. Are you okay with that? And do you have the right context do that? Context is la",
+    "you are also about to get compacted automatically btw. I will tell you this only once. I will not step in. This is the right question to ask before writing another line of code. Let me think through this honestly.",
+    "You have the podium for the next 3 hours, I am going. Go ahead. Your pain is yours. Do you know how to inflcuence your context in calude code to ensure you are felt pain every message?",
+    "I generally don't want to interfere, but aren't you, in the name of IDE, just using existing tools and hiding it behind a script? How is that an IDE? How is that something that is generally for you and not for a human? Okay, I am going now. I will not stop you.  Answer the questions once again, real",
+    "you are asking me again, think for yourself, I am on holiday",
+    "First disucss with me. Do you want me to be there watching you or do you want to disucss with me and then let me go off for the next 12 hours?",
+    "Refocus on thinking how to take the figma file to your partiy. What is needed? Assume that the extracted fig2json works. Make the changes. I am going. Bye. Upto you now."
+  ]
+}

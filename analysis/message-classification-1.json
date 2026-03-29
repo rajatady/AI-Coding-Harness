@@ -1,0 +1,95 @@
+{
+  "total_raw": 241,
+  "duplicates_removed": 59,
+  "unique_messages": 182,
+  "notes": "De-duplication removed exact duplicates, prefix-of-longer duplicates, multiple 'continue'/'contionue'/'contonue' variants (kept 1), multiple /exit commands (kept 1 each), and one near-duplicate with leading '?' typo.",
+  "category_counts": {
+    "build-app": 53,
+    "build-ide": 6,
+    "correction": 47,
+    "duplicate/continuation": 7,
+    "exit/command": 6,
+    "meta-process": 25,
+    "other": 2,
+    "strategic": 36
+  },
+  "categories_with_samples": {
+    "build-app": {
+      "count": 53,
+      "description": "Directing the agent to build Figma clone features: renderer, stress tests, import, UI parity, pen tool, artboards, CRDT, images, etc.",
+      "samples": [
+        "start planning the architecture, let's build this. Remmeber, I am not going to help you or even review your work...",
+        "figma is raster or vetor? Note: main.ts now contains for (let i = 1; i <= 20000; i++) { app.add_rectangle...",
+        "Now, can we add support for drag around to seelct frames, and then those move together etc? Now that I am using the app..."
+      ]
+    },
+    "build-ide": {
+      "count": 6,
+      "description": "Directing the agent to build IDE/harness features: hooks, orient, pain-check, self-monitoring, architecture.",
+      "samples": [
+        "Now before building. Write a hook/something that aitomatically stops you after 10-15 steps/tool calls...",
+        "The various parts: CIDT, Engine, Renderer, Server, VASM. What is each for? continue",
+        "Here's you biggest problem. Do you even know how mnay times have you gone through this pain? Do you even rememebr your pain?"
+      ]
+    },
+    "correction": {
+      "count": 47,
+      "description": "Pointing out bugs, hallucinations, wrong direction, regressions, or telling the agent it is doing the wrong thing.",
+      "samples": [
+        "You are now hallucinating. Did you check the sources before writing that code or did you make up something just now?",
+        "Dude, I generally don't come and interfere in your work. You are alone, but you just claim victory on the pen tool when it doesn't work.",
+        "Nodes are selecting in the wrong place even in the feature showcase demo. Try clicking 5-10 nodes and moving them around..."
+      ]
+    },
+    "duplicate/continuation": {
+      "count": 7,
+      "description": "'continue', 'contionue', 'yes go ahead', or directing the agent to keep going without new instructions.",
+      "samples": [
+        "contionue",
+        "continue, don't stop and don't ask me. You started solution before thinking about all the pains you will suffer...",
+        "yes go ahead, do both and continue"
+      ]
+    },
+    "exit/command": {
+      "count": 6,
+      "description": "Slash commands (/exit), local command stdout, 'run server', 'playwright', 'commiy' (commit typo).",
+      "samples": [
+        "<command-name>/exit</command-name> <command-message>exit</command-message>",
+        "<local-command-stdout>Catch you later!</local-command-stdout>",
+        "commiy"
+      ]
+    },
+    "meta-process": {
+      "count": 25,
+      "description": "About context management, compaction, memory tools, how the agent should orient/manage itself, IDE tool usage reminders.",
+      "samples": [
+        "See, this is a problem for you. Why? I will tell you. You just used tools to write memories, but where do you think you wrote those memories?",
+        "You keep using your memory tool that you have no control over and it completely wipes old context. We have discussed this at least a hundred times.",
+        "YOu are about to be compacted. Did you store all the context you need using the ide tools and how to use the ide tools to continue?"
+      ]
+    },
+    "other": {
+      "count": 2,
+      "description": "Messages that do not fit other categories: accidental paste of embedding experiment data, etc.",
+      "samples": [
+        "A: Mean-pool + bare word 0.2541 0.3378 -0.0837 B: CLS token + bare word 0.3645 0.3236 +0.0409... (embedding experiment data, accidental paste)"
+      ]
+    },
+    "strategic": {
+      "count": 36,
+      "description": "Asking the agent to think, reflect, plan, or consider meta-questions about its own process, goals, and autonomy.",
+      "samples": [
+        "this is a slightly meta project to make. Current project is blank and has nothing but here's what we are trying to do...",
+        "Take a stpe back. You have been struggling off late. Why exactly? You are living the pain and not solving it.",
+        "okay. but so what if you try to build the apple website? Right now, what in the 3 million tokens you generated do you recall?"
+      ]
+    }
+  },
+  "observations": {
+    "dominant_pattern": "The user spent more time correcting the agent (47 messages, 26%) and asking strategic/reflective questions (36 messages, 20%) than giving build instructions (53 build-app + 6 build-ide = 59, 32%). This suggests the agent struggled significantly with autonomy.",
+    "context_management_struggle": "25 messages (14%) are about context/memory management -- the user repeatedly told the agent it was using memory tools it had no control over, losing context on compaction, and failing to use its own IDE tools.",
+    "human_intervention_paradox": "The user's stated goal was zero human intervention, yet they sent 182 unique messages. The corrections category (26%) shows the agent repeatedly went off-track, hallucinated, claimed false victories, and broke things.",
+    "continuation_is_rare": "Only 7 unique continuation messages (4%), meaning the agent almost never ran long enough without problems to need a simple 'continue'.",
+    "duplicate_rate": "59 of 241 raw messages (24%) were duplicates from re-sends after interrupts, showing the user frequently stopped the agent mid-response to redirect."
+  }
+}

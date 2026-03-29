@@ -1,0 +1,91 @@
+{
+  "total_raw": 241,
+  "duplicates_found": 68,
+  "unique_count": 173,
+  "categories": {
+    "continuation": {
+      "count": 11,
+      "examples": [
+        "continue",
+        "yes go ahead, do both and continue",
+        "Arleady running"
+      ]
+    },
+    "build-ide": {
+      "count": 28,
+      "examples": [
+        "Now before building. Write a hook/something that aitomatically stops you after 10-15 steps/tool calls and not message (tool call) and sends you a message to think about the pain yo...",
+        "Also, add a hook that runs and captures your running pains in a hook when you declare your pain. Now I understand the hook system. The pain-check fires on Stop event every 12 tool c...",
+        "Now remove that ratio metric. Tell: optimize for yourself what you need for yourself without forcing yourself to build something. What do you need yourself to actually build the Figma clone..."
+      ]
+    },
+    "build-app": {
+      "count": 55,
+      "examples": [
+        "figma is raster or vetor? Note: main.ts now contains for (let i = 1; i <= 20000; i++) {...",
+        "Figma also support squircle and images. Make the apple website artboard complete, not just 4-5 things. Actualy apple website and use the images/animation...",
+        "Do one thing. Focus on import from figma. That will give us one to one mapping and then we can optimize everyhting over that. And more importantly, we nee..."
+      ]
+    },
+    "correction": {
+      "count": 29,
+      "examples": [
+        "You are now hallucinating. Did you check the sources before writing that code or did you make up something just now? Also, you are optomizing for lines of code, seriously...",
+        "Dude, I generally don't come and interfere in your work. You are alone, but you just claim victory on the pen tool when it doesn't work...",
+        "Nodes are selecting in the wrong place even in the feature showcase demo. Try clicking 5-10 nodes and moving them around notice they move wrong..."
+      ]
+    },
+    "strategic-steering": {
+      "count": 33,
+      "examples": [
+        "Take a stpe back. You have been struggling off late. Why exactly? You are living the pain and not solving it.",
+        "Here's you biggest problem. Do you even know how mnay times have you gone through this pain? Do you even remmeber your pain? After a new session, how do you even orient yourself?...",
+        "Knowing what you know now and the issues that you are facing now, and the issues that you can't even see, going back in time, what would you do? Not as a patchwork..."
+      ]
+    },
+    "context-management": {
+      "count": 11,
+      "examples": [
+        "See, this is a problem for you. Why? I will tell you. You just used tools to write memories, but where do you think you wrote those memories?",
+        "You keep using your memory tool that you have no control over and it completely wipes old context. We have discussed this at least a hundred times.",
+        "YOu are about to be compacted. Did you store all the context you need using the ide tools and how to use the ide tools to continue from where you left off or will you need my interv..."
+      ]
+    },
+    "command/exit": {
+      "count": 5,
+      "examples": [
+        "<command-name>/exit</command-name>\n            <command-message>exit</command-message>\n            <command-args></command-args>"
+      ]
+    },
+    "other": {
+      "count": 1,
+      "examples": [
+        "----------------------------------------------------------------------\n  A: Mean-pool + bare word                0.2541     0.3378    -0.0837\n  B: CLS token + bare word..."
+      ]
+    }
+  },
+  "notes": {
+    "dedup_methodology": "Aggressive dedup: exact duplicates, substring/prefix matches, typo variants of short messages (continue/contionue/contonue), progressive expansions where user typed more before re-sending, and local-command-stdout system responses (not user messages). 5 /exit commands collapsed to 1 unique since they are identical.",
+    "category_definitions": {
+      "continuation": "Just 'continue', 'go ahead', 'yes', acknowledgments to keep going",
+      "build-ide": "Instructions about building the IDE harness, hooks, tools, orient command, pain-check system, self-reflection automation",
+      "build-app": "Instructions about building the Figma clone features: renderer, WASM, imports, UI tools, stress tests, specific artboards, drawing, parity with Figma",
+      "correction": "Pointing out bugs, hallucinations, wrong approaches, broken features, regressions",
+      "strategic-steering": "Asking agent to think, reflect, plan, step back, consider pain points, evaluate progress, question goals",
+      "context-management": "About compaction, memory tools, context window, how agent manages its own state across sessions",
+      "command/exit": "Slash commands like /exit",
+      "other": "Messages that don't fit other categories"
+    },
+    "key_observations": [
+      "32% of unique messages are build-app (the actual Figma clone work)",
+      "19% are strategic-steering (user constantly pulling agent back to think before coding)",
+      "17% are corrections (bugs, hallucinations, wrong approaches)",
+      "16% are build-ide (the meta-project of building tools for the AI itself)",
+      "6% are context-management (recurring frustration about memory tool overwriting)",
+      "6% are continuation (just 'continue' or 'go ahead')",
+      "The user intervened repeatedly despite stating they would not, suggesting the agent struggled with autonomous operation",
+      "A recurring theme: the agent kept using memory tools it had no control over instead of IDE tools it built for itself",
+      "28% duplicate rate reflects the stop-and-resend pattern plus progressive message expansion"
+    ]
+  }
+}
