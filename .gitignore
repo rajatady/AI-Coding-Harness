@@ -155,9 +155,11 @@ dist
 *.png
 *.fig
 .playwright-mcp/
-imports/
+dist/imports/
+public/imports/*
+!public/imports/.gitkeep
 app/src/wasm/
-app/pkg/
+# app/pkg/ — committed for Vercel deploy (no wasm-pack on Vercel)
 pkg/
 coffee-shop-visual-ours_compare.html
 

@@ -1,5 +1,7 @@
 # aide
 
+**Demo:** https://aide-five-delta.vercel.app
+
 An IDE designed for AI coding agents, not humans. (Experiment: exploring what happens when an AI coding agent designs its own development tools instead of using tools designed by humans for humans.)
 
 The human provided one goal: build a Figma clone that can load 2 million nodes at 120 FPS, where each node group is a full Apple website artboard (~20 nested elements: nav bar, hero section, product cards, footer) at any zoom level. The AI agent chose the stack (Rust/WASM), chose the architecture, and chose what tools it needed to build for itself in order to get there. The human's role was direction and coaching, not implementation or tool design.
